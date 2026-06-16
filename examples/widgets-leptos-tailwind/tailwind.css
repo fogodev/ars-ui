@@ -2,6 +2,7 @@
 
 @source "./index.html";
 @source "./src/**/*.{rs,html,css}";
+@source "../../crates/ars-leptos-components/src/**/*.{rs,html,css}";
 
 @layer base {
     body {

@@ -20,106 +20,109 @@ use ars_forms::validation::Error;
 /// Unknown future types can still be passed through lower-level adapter attrs
 /// until this enum is expanded.
 #[non_exhaustive]
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum InputType {
     /// `type="button"`.
-    Button,
+    Button = 0,
 
     /// `type="checkbox"`.
-    Checkbox,
+    Checkbox = 1,
 
     /// `type="color"`.
-    Color,
+    Color = 2,
 
     /// `type="date"`.
-    Date,
+    Date = 3,
 
     /// `type="datetime-local"`.
-    DateTimeLocal,
+    DateTimeLocal = 4,
 
     /// `type="email"`.
-    Email,
+    Email = 5,
 
     /// `type="file"`.
-    File,
+    File = 6,
 
     /// `type="hidden"`.
-    Hidden,
+    Hidden = 7,
 
     /// `type="image"`.
-    Image,
+    Image = 8,
 
     /// `type="month"`.
-    Month,
+    Month = 9,
 
     /// `type="number"`.
-    Number,
+    Number = 10,
 
     /// `type="password"`.
-    Password,
+    Password = 11,
 
     /// `type="radio"`.
-    Radio,
+    Radio = 12,
 
     /// `type="range"`.
-    Range,
+    Range = 13,
 
     /// `type="reset"`.
-    Reset,
+    Reset = 14,
 
     /// `type="search"`.
-    Search,
+    Search = 15,
 
     /// `type="submit"`.
-    Submit,
+    Submit = 16,
 
     /// `type="tel"`.
-    Tel,
+    Tel = 17,
 
     /// `type="text"`.
     #[default]
-    Text,
+    Text = 18,
 
     /// `type="time"`.
-    Time,
+    Time = 19,
 
     /// `type="url"`.
-    Url,
+    Url = 20,
 
     /// `type="week"`.
-    Week,
+    Week = 21,
 }
 
 impl InputType {
     /// Returns the HTML token for this input type.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Button => "button",
-            Self::Checkbox => "checkbox",
-            Self::Color => "color",
-            Self::Date => "date",
-            Self::DateTimeLocal => "datetime-local",
-            Self::Email => "email",
-            Self::File => "file",
-            Self::Hidden => "hidden",
-            Self::Image => "image",
-            Self::Month => "month",
-            Self::Number => "number",
-            Self::Password => "password",
-            Self::Radio => "radio",
-            Self::Range => "range",
-            Self::Reset => "reset",
-            Self::Search => "search",
-            Self::Submit => "submit",
-            Self::Tel => "tel",
-            Self::Text => "text",
-            Self::Time => "time",
-            Self::Url => "url",
-            Self::Week => "week",
-        }
+        INPUT_TYPE_TOKENS[self as usize]
     }
 }
+
+const INPUT_TYPE_TOKENS: [&str; 22] = [
+    "button",
+    "checkbox",
+    "color",
+    "date",
+    "datetime-local",
+    "email",
+    "file",
+    "hidden",
+    "image",
+    "month",
+    "number",
+    "password",
+    "radio",
+    "range",
+    "reset",
+    "search",
+    "submit",
+    "tel",
+    "text",
+    "time",
+    "url",
+    "week",
+];
 
 /// Single state for the field component machine.
 ///
@@ -649,6 +652,38 @@ mod tests {
 
     fn snapshot_attrs(attrs: &AttrMap) -> String {
         format!("{attrs:#?}")
+    }
+
+    #[test]
+    fn input_type_as_str_returns_html_tokens() {
+        let cases = [
+            (InputType::Button, "button"),
+            (InputType::Checkbox, "checkbox"),
+            (InputType::Color, "color"),
+            (InputType::Date, "date"),
+            (InputType::DateTimeLocal, "datetime-local"),
+            (InputType::Email, "email"),
+            (InputType::File, "file"),
+            (InputType::Hidden, "hidden"),
+            (InputType::Image, "image"),
+            (InputType::Month, "month"),
+            (InputType::Number, "number"),
+            (InputType::Password, "password"),
+            (InputType::Radio, "radio"),
+            (InputType::Range, "range"),
+            (InputType::Reset, "reset"),
+            (InputType::Search, "search"),
+            (InputType::Submit, "submit"),
+            (InputType::Tel, "tel"),
+            (InputType::Text, "text"),
+            (InputType::Time, "time"),
+            (InputType::Url, "url"),
+            (InputType::Week, "week"),
+        ];
+
+        for (input_type, token) in cases {
+            assert_eq!(input_type.as_str(), token);
+        }
     }
 
     #[test]

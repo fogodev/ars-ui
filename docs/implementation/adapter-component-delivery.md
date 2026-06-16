@@ -15,6 +15,7 @@ The detailed workflow is split across:
 - [adapter-components/02-adapter-api-and-wiring.md](adapter-components/02-adapter-api-and-wiring.md)
 - [adapter-components/03-framework-rules.md](adapter-components/03-framework-rules.md)
 - [adapter-components/04-adapter-tests.md](adapter-components/04-adapter-tests.md)
+- [adapter-components/13-composition-integration.md](adapter-components/13-composition-integration.md)
 - [adapter-components/05-e2e-fixtures-and-harnesses.md](adapter-components/05-e2e-fixtures-and-harnesses.md)
 - [adapter-components/06-widgets-examples.md](adapter-components/06-widgets-examples.md)
 - [adapter-components/09-browser-parity-harness.md](adapter-components/09-browser-parity-harness.md)
@@ -47,6 +48,8 @@ Adapter delivery spans several distinct concerns:
 - framework-specific Leptos and Dioxus rules;
 - adapter SSR/unit tests plus focused wasm browser tests for browser-runtime
   wiring that SSR cannot prove;
+- composition integration tests with every foundation context the component
+  consumes, especially `Form` and `Fieldset` for form controls;
 - E2E fixtures, harnesses, matrix entries, axe, and computed visual assertions
   for complete user-visible workflows and outcome parity;
 - public widgets demos in all six example crates;
@@ -130,6 +133,40 @@ surface before continuing.
 Adapter-owned browser APIs must still consume core state. For example, native
 drag image setup may live in Leptos/Dioxus because it needs `DataTransfer`, but
 the dragged key set must come from `crates/ars-components`.
+
+## Adapter Semantic Boundary
+
+Adapter code may own renderer glue:
+
+- converting framework props into agnostic `Props`;
+- converting framework events into agnostic `Event`s;
+- converting agnostic attrs into Leptos/Dioxus attrs;
+- reading framework contexts and merging them into agnostic props;
+- wiring children, slots, DOM refs, callbacks, and framework-owned browser
+  handles.
+
+Adapter code must not own component semantics. Any helper that can be tested
+without Leptos, Dioxus, DOM refs, browser event types, or renderer APIs belongs
+in `crates/ars-components` or another shared crate before adapter wiring. This
+includes state derivation, event outcomes, `checked`/selected value mapping,
+disabled/readonly mutation rules, keyboard meaning, ARIA relationship
+construction, validation semantics, ids, form serialization policy, and
+component-owned localized messages.
+
+Classify every new private adapter helper before landing it:
+
+- `renderer-glue`: needs framework attrs, views, events, hooks, refs, or DOM
+  handles;
+- `framework-context-merge`: reads adapter contexts and builds agnostic props;
+- `component-semantics`: must move to the agnostic component API;
+- `foundation-semantics`: must move to the relevant shared foundation crate.
+
+Duplicated private helpers in both Leptos and Dioxus are presumed to be
+renderer-independent until proven otherwise. Move them into the agnostic layer,
+or mark the function with a short justification comment such as
+`// adapter-rendering-glue: needs Dioxus event types`. Adapter-local extension
+traits over agnostic `Api`, `Props`, `State`, or `Event` are not acceptable
+escape hatches; add the method to the agnostic API when both adapters need it.
 
 For details, read [adapter-components/07-parity-review.md](adapter-components/07-parity-review.md)
 and [adapter-components/09-browser-parity-harness.md](adapter-components/09-browser-parity-harness.md).

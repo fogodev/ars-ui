@@ -10,13 +10,14 @@ use dioxus::{events::MountedData, prelude::*};
 use web_sys::wasm_bindgen::{JsCast as _, JsValue};
 
 use crate::{
-    as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs, callbacks, use_machine,
+    attr_map_to_dioxus_inline_attrs, callbacks, merge_dioxus_attrs, use_machine,
     use_messages_and_locale, use_stable_id,
 };
 
 #[derive(Clone, Copy)]
 pub(crate) struct FormContext {
     pub(crate) machine: crate::UseMachineReturn<form::Machine>,
+    pub(crate) reset_generation: Signal<u64>,
 }
 
 /// Props for the Dioxus [`Form`] component.
@@ -72,6 +73,7 @@ pub fn Form(props: FormProps) -> Element {
     let generated_id = use_stable_id("form");
     let id = props.id.unwrap_or(generated_id);
     let mut form_ref = use_signal(|| None::<Rc<MountedData>>);
+    let mut reset_generation = use_signal(|| 0_u64);
 
     let mut core_props = Props::new().id(&id);
 
@@ -100,7 +102,10 @@ pub fn Form(props: FormProps) -> Element {
     let (form_messages, form_locale) =
         use_messages_and_locale::<ars_forms::form::Messages>(None, None);
 
-    use_context_provider(|| FormContext { machine });
+    use_context_provider(|| FormContext {
+        machine,
+        reset_generation,
+    });
 
     let component_attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()))();
     let attrs = strip_form_event_attrs(merge_dioxus_attrs(props.attrs, component_attrs));
@@ -167,6 +172,7 @@ pub fn Form(props: FormProps) -> Element {
             },
             onreset: move |_event| {
                 machine.send.call(form::Event::Reset);
+                reset_generation.set(reset_generation().wrapping_add(1));
                 callbacks::call(props.on_reset.as_ref());
             },
             ..attrs,
@@ -283,63 +289,110 @@ fn native_validation_error(
         return Error::required(messages, locale);
     }
 
-    if validity_flag(element, "typeMismatch")
-        && let Some(input_type) = element.get_attribute("type")
-    {
-        return match input_type.as_str() {
-            "email" => Error::email(messages, locale),
-            "url" => Error::url(messages, locale),
-            _ => Error::custom("native", (messages.pattern_error)(locale)),
-        };
-    }
-
-    if validity_flag(element, "patternMismatch")
-        && let Some(pattern) = element.get_attribute("pattern")
-    {
-        return Error::pattern(pattern, messages, locale);
-    }
-
-    if validity_flag(element, "tooShort")
-        && let Some(min_length) = element
-            .get_attribute("minlength")
-            .and_then(|value| value.parse::<usize>().ok())
-    {
-        return Error::min_length(min_length, messages, locale);
-    }
-
-    if validity_flag(element, "tooLong")
-        && let Some(max_length) = element
-            .get_attribute("maxlength")
-            .and_then(|value| value.parse::<usize>().ok())
-    {
-        return Error::max_length(max_length, messages, locale);
-    }
-
-    if validity_flag(element, "rangeUnderflow")
-        && let Some(min) = element
-            .get_attribute("min")
-            .and_then(|value| value.parse::<f64>().ok())
-    {
-        return Error::min(min, messages, locale);
-    }
-
-    if validity_flag(element, "rangeOverflow")
-        && let Some(max) = element
-            .get_attribute("max")
-            .and_then(|value| value.parse::<f64>().ok())
-    {
-        return Error::max(max, messages, locale);
-    }
-
-    if validity_flag(element, "stepMismatch")
-        && let Some(step) = element
-            .get_attribute("step")
-            .and_then(|value| value.parse::<f64>().ok())
-    {
-        return Error::step(step, messages, locale);
+    for error in [
+        build_type_mismatch_error(element, messages, locale),
+        build_pattern_mismatch_error(element, messages, locale),
+        build_length_error(element, messages, locale),
+        build_range_error(element, messages, locale),
+        build_step_error(element, messages, locale),
+    ] {
+        if let Some(error) = error {
+            return error;
+        }
     }
 
     Error::custom("native", (messages.pattern_error)(locale))
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn build_type_mismatch_error(
+    element: &web_sys::Element,
+    messages: &ars_forms::form::Messages,
+    locale: &ars_i18n::Locale,
+) -> Option<Error> {
+    if !validity_flag(element, "typeMismatch") {
+        return None;
+    }
+
+    Some(match element.get_attribute("type").as_deref() {
+        Some("email") => Error::email(messages, locale),
+        Some("url") => Error::url(messages, locale),
+        _ => Error::custom("native", (messages.pattern_error)(locale)),
+    })
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn build_pattern_mismatch_error(
+    element: &web_sys::Element,
+    messages: &ars_forms::form::Messages,
+    locale: &ars_i18n::Locale,
+) -> Option<Error> {
+    validity_flag(element, "patternMismatch")
+        .then(|| element.get_attribute("pattern"))
+        .flatten()
+        .map(|pattern| Error::pattern(pattern, messages, locale))
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn build_length_error(
+    element: &web_sys::Element,
+    messages: &ars_forms::form::Messages,
+    locale: &ars_i18n::Locale,
+) -> Option<Error> {
+    if validity_flag(element, "tooShort")
+        && let Some(min_length) = build_parsed_attr::<usize>(element, "minlength")
+    {
+        return Some(Error::min_length(min_length, messages, locale));
+    }
+
+    if validity_flag(element, "tooLong")
+        && let Some(max_length) = build_parsed_attr::<usize>(element, "maxlength")
+    {
+        return Some(Error::max_length(max_length, messages, locale));
+    }
+
+    None
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn build_range_error(
+    element: &web_sys::Element,
+    messages: &ars_forms::form::Messages,
+    locale: &ars_i18n::Locale,
+) -> Option<Error> {
+    if validity_flag(element, "rangeUnderflow")
+        && let Some(min) = build_parsed_attr::<f64>(element, "min")
+    {
+        return Some(Error::min(min, messages, locale));
+    }
+
+    if validity_flag(element, "rangeOverflow")
+        && let Some(max) = build_parsed_attr::<f64>(element, "max")
+    {
+        return Some(Error::max(max, messages, locale));
+    }
+
+    None
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn build_step_error(
+    element: &web_sys::Element,
+    messages: &ars_forms::form::Messages,
+    locale: &ars_i18n::Locale,
+) -> Option<Error> {
+    if !validity_flag(element, "stepMismatch") {
+        return None;
+    }
+
+    build_parsed_attr::<f64>(element, "step").map(|step| Error::step(step, messages, locale))
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn build_parsed_attr<T: std::str::FromStr>(element: &web_sys::Element, attr: &str) -> Option<T> {
+    element
+        .get_attribute(attr)
+        .and_then(|value| value.parse::<T>().ok())
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]

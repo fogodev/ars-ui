@@ -11,7 +11,7 @@ use std::{
 
 #[cfg(any(feature = "ssr", all(feature = "hydrate", target_arch = "wasm32")))]
 use ars_core::HydrationSnapshot;
-use ars_core::{CleanupFn, Env, HasId, Machine, RenderMode, Service};
+use ars_core::{AttrMap, CleanupFn, Env, HasId, HtmlAttr, Machine, RenderMode, Service};
 use leptos::{prelude::*, reactive::owner::LocalStorage};
 #[cfg(any(all(test, target_arch = "wasm32"), not(feature = "ssr")))]
 use {ars_core::StrongSend, std::sync::Arc};
@@ -177,6 +177,60 @@ where
                 f(&api)
             })
         })
+    }
+
+    /// Builds a memo for a string attribute derived from a machine-backed part.
+    ///
+    /// Missing or non-string attributes resolve to an empty string. Use
+    /// [`attr_optional_string_memo`](Self::attr_optional_string_memo) when
+    /// absence should remain observable.
+    pub fn attr_string_memo<F>(&self, attrs: F, attr: HtmlAttr) -> Memo<String>
+    where
+        F: for<'a, 'b> Fn(&'a M::Api<'b>) -> AttrMap + Send + Sync + 'static,
+    {
+        self.derive(move |api| attrs(api).get(&attr).map(str::to_owned).unwrap_or_default())
+    }
+
+    /// Builds a memo for an optional string attribute derived from a machine-backed part.
+    ///
+    /// Missing or non-string attributes resolve to [`None`], which lets callers
+    /// use `AttrValue::reactive_optional` without materializing empty
+    /// attributes.
+    pub fn attr_optional_string_memo<F>(&self, attrs: F, attr: HtmlAttr) -> Memo<Option<String>>
+    where
+        F: for<'a, 'b> Fn(&'a M::Api<'b>) -> AttrMap + Send + Sync + 'static,
+    {
+        self.derive(move |api| attrs(api).get(&attr).map(str::to_owned))
+    }
+
+    /// Builds a memo for whether an attribute key is present in a machine-backed part.
+    ///
+    /// This is useful for boolean HTML attributes and for string-valued
+    /// ARIA/data attributes where the adapter only needs presence to decide
+    /// whether to render a reactive boolean attribute.
+    pub fn attr_presence_memo<F>(&self, attrs: F, attr: HtmlAttr) -> Memo<bool>
+    where
+        F: for<'a, 'b> Fn(&'a M::Api<'b>) -> AttrMap + Send + Sync + 'static,
+    {
+        self.derive(move |api| attrs(api).contains(&attr))
+    }
+
+    /// Builds Leptos attributes for a machine-backed compound part.
+    ///
+    /// The framework-agnostic `part_attrs` closure owns semantic attributes.
+    /// This method merges consumer `class` / `style` escape hatches and
+    /// converts the result to Leptos attributes ready for spreading with
+    /// `{..attrs}`.
+    pub fn part_attrs<F>(
+        &self,
+        part_attrs: F,
+        class: Option<TextProp>,
+        style: Option<TextProp>,
+    ) -> Vec<crate::LeptosAttribute>
+    where
+        F: for<'a, 'b> Fn(&'a M::Api<'b>) -> AttrMap + Send + Sync + 'static,
+    {
+        self.with_api_snapshot(|api| crate::apply_part_attrs(part_attrs(api), class, style))
     }
 
     /// Provides imperative, non-reactive API access wrapped in an [`EphemeralRef`].

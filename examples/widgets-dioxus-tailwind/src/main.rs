@@ -12,6 +12,9 @@ use crate::{
     text::WidgetsText,
 };
 
+const ARS_BASE_STYLE: &str = include_str!("../public/ars-base.css");
+const ARS_INTERACTIONS_STYLE: &str = include_str!("../public/ars-interactions.css");
+
 fn main() {
     dioxus::launch(App);
 }
@@ -22,6 +25,8 @@ fn App() -> Element {
 
     rsx! {
         ArsProvider { locale, i18n_registries: messages::i18n_registries(),
+            style { "{ARS_BASE_STYLE}" }
+            style { "{ARS_INTERACTIONS_STYLE}" }
             main { class: "mx-auto min-h-screen max-w-6xl px-5 py-10 md:px-8",
                 p { class: "mb-2 text-xs font-extrabold uppercase tracking-wider text-blue-700",
                     {t(WidgetsText::TailwindStyling)}

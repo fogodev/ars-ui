@@ -227,7 +227,7 @@ fn dioxus_command(path: &str, port: u16) -> Result<Command, String> {
     Ok(command)
 }
 
-fn wait_for_fixture_server(
+pub(crate) fn wait_for_fixture_server(
     mut child: Child,
     log_path: PathBuf,
     addr: SocketAddr,

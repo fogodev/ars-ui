@@ -7,8 +7,7 @@ use ars_forms::validation::Error;
 use dioxus::prelude::*;
 
 use crate::{
-    as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs, callbacks, use_machine,
-    use_stable_id,
+    attr_map_to_dioxus_inline_attrs, callbacks, merge_dioxus_attrs, use_machine, use_stable_id,
 };
 
 #[derive(Clone, Copy)]
@@ -68,21 +67,22 @@ pub struct FieldProps {
 pub fn Field(props: FieldProps) -> Element {
     let generated_id = use_stable_id("field");
     let id = props.id.unwrap_or(generated_id);
-    let form_context = try_use_context::<super::form::FormContext>();
-    let fieldset_context = try_use_context::<super::fieldset::InheritedFieldsetContext>();
 
-    let errors = merged_validation_errors(props.errors, props.name.as_deref(), form_context);
-    let inherited_disabled = fieldset_context.is_some_and(|ctx| (ctx.disabled)());
-    let inherited_readonly = fieldset_context.is_some_and(|ctx| (ctx.readonly)());
-    let inherited_invalid = fieldset_context.is_some_and(|ctx| (ctx.invalid)());
+    let support = super::field_support::use_field_support(
+        props.disabled,
+        props.invalid,
+        props.readonly,
+        props.errors,
+        props.name.as_deref(),
+    );
 
     let mut core_props = Props::new()
         .id(&id)
         .required(props.required)
-        .disabled(props.disabled || inherited_disabled)
-        .readonly(props.readonly || inherited_readonly)
-        .invalid(props.invalid || inherited_invalid)
-        .errors(errors);
+        .disabled(support.disabled)
+        .readonly(support.readonly)
+        .invalid(support.invalid)
+        .errors(support.errors);
 
     if let Some(dir) = props.dir {
         core_props = core_props.dir(dir);
@@ -100,34 +100,6 @@ pub fn Field(props: FieldProps) -> Element {
     }
 }
 
-fn merged_validation_errors(
-    mut errors: Vec<Error>,
-    name: Option<&str>,
-    form_context: Option<super::form::FormContext>,
-) -> Vec<Error> {
-    if let Some(name) = name
-        && let Some(form_context) = form_context
-    {
-        let _ = &*form_context.machine.context_version.read();
-
-        if let Some(form_errors) = form_context
-            .machine
-            .service
-            .peek()
-            .context()
-            .validation_errors
-            .get(name)
-            && !form_errors.is_empty()
-        {
-            errors.reserve(form_errors.len());
-            form_errors
-                .iter()
-                .for_each(|error| errors.push(error.clone()));
-        }
-    }
-
-    errors
-}
 /// Props for the Dioxus [`Label`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
 pub struct LabelProps {

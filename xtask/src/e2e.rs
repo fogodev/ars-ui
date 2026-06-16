@@ -39,6 +39,41 @@ pub enum DesktopExample {
     DioxusTailwind,
 }
 
+/// Public widgets example covered by browser smoke checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum WidgetsExample {
+    /// Plain Leptos widgets example.
+    Leptos,
+
+    /// Plain Dioxus widgets example.
+    Dioxus,
+
+    /// Leptos CSS widgets example.
+    LeptosCss,
+
+    /// Dioxus CSS widgets example.
+    DioxusCss,
+
+    /// Leptos Tailwind widgets example.
+    LeptosTailwind,
+
+    /// Dioxus Tailwind widgets example.
+    DioxusTailwind,
+}
+
+impl WidgetsExample {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Leptos => "leptos",
+            Self::Dioxus => "dioxus",
+            Self::LeptosCss => "leptos-css",
+            Self::DioxusCss => "dioxus-css",
+            Self::LeptosTailwind => "leptos-tailwind",
+            Self::DioxusTailwind => "dioxus-tailwind",
+        }
+    }
+}
+
 impl DesktopExample {
     const fn as_str(self) -> &'static str {
         match self {
@@ -52,6 +87,9 @@ impl DesktopExample {
 /// Component category covered by an E2E run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Category {
+    /// Run input component E2E harnesses.
+    Input,
+
     /// Run navigation component E2E harnesses.
     Navigation,
 
@@ -62,6 +100,7 @@ pub enum Category {
 impl Category {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::Input => "input",
             Self::Navigation => "navigation",
             Self::Utility => "utility",
         }
@@ -124,6 +163,16 @@ pub fn run_navigation(options: &Options) -> Result<(), Error> {
     run_category(Category::Navigation, options)
 }
 
+/// Runs the input browser E2E harnesses through the standalone E2E crate.
+///
+/// # Errors
+///
+/// Returns an error when the standalone harness cannot be spawned or exits
+/// unsuccessfully.
+pub fn run_input(options: &Options) -> Result<(), Error> {
+    run_category(Category::Input, options)
+}
+
 /// Runs the utility browser E2E harnesses through the standalone E2E crate.
 ///
 /// # Errors
@@ -150,6 +199,26 @@ pub fn run_desktop(example: DesktopExample) -> Result<(), Error> {
     } else {
         Err(Error::Command(format!(
             "ars-e2e desktop exited with {status}"
+        )))
+    }
+}
+
+/// Runs public widgets browser smoke checks through the standalone E2E crate.
+///
+/// # Errors
+///
+/// Returns an error when the standalone harness cannot be spawned or exits
+/// unsuccessfully.
+pub fn run_widgets(example: WidgetsExample, options: &Options) -> Result<(), Error> {
+    let status = widgets_command(example, options)
+        .status()
+        .map_err(|error| Error::Command(format!("failed to run ars-e2e widgets: {error}")))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::Command(format!(
+            "ars-e2e widgets exited with {status}"
         )))
     }
 }
@@ -198,6 +267,12 @@ pub fn navigation_command(options: &Options) -> Command {
     category_command(Category::Navigation, options)
 }
 
+/// Builds the cargo command used to dispatch input E2E harnesses.
+#[must_use]
+pub fn input_command(options: &Options) -> Command {
+    category_command(Category::Input, options)
+}
+
 /// Builds the cargo command used to dispatch desktop E2E smoke checks.
 #[must_use]
 pub fn desktop_command(example: DesktopExample) -> Command {
@@ -211,6 +286,44 @@ pub fn desktop_command(example: DesktopExample) -> Command {
         .arg("desktop")
         .arg("--example")
         .arg(example.as_str())
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    command
+}
+
+/// Builds the cargo command used to dispatch public widgets smoke checks.
+#[must_use]
+pub fn widgets_command(example: WidgetsExample, options: &Options) -> Command {
+    let mut command = Command::new("cargo");
+
+    command
+        .arg("run")
+        .arg("-p")
+        .arg("ars-e2e")
+        .arg("--")
+        .arg("widgets")
+        .arg("--example")
+        .arg(example.as_str());
+
+    if let Some(port) = options.port {
+        command.arg("--port").arg(port.to_string());
+    }
+
+    if let Some(webdriver_url) = &options.webdriver_url {
+        command.arg("--webdriver-url").arg(webdriver_url);
+    }
+
+    if options.no_server {
+        command.arg("--no-server");
+    }
+
+    if !options.headless {
+        command.arg("--headed");
+    }
+
+    command
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
@@ -292,6 +405,21 @@ mod tests {
     }
 
     #[test]
+    fn category_command_dispatches_input_harnesses() {
+        let options = Options {
+            adapter: Adapter::Leptos,
+            port: None,
+            webdriver_url: None,
+            no_server: false,
+            headless: true,
+        };
+
+        let input = input_command(&options);
+
+        assert!(args(&input).contains(&"input".to_string()));
+    }
+
+    #[test]
     fn category_command_can_request_visible_browser() {
         let command = navigation_command(&Options {
             adapter: Adapter::Leptos,
@@ -329,5 +457,38 @@ mod tests {
 
         assert!(args(&css).contains(&"dioxus-css".to_string()));
         assert!(args(&tailwind).contains(&"dioxus-tailwind".to_string()));
+    }
+
+    #[test]
+    fn widgets_command_dispatches_public_widgets_example() {
+        let command = widgets_command(
+            WidgetsExample::DioxusTailwind,
+            &Options {
+                adapter: Adapter::Leptos,
+                port: Some(5305),
+                webdriver_url: Some("http://localhost:9516".to_string()),
+                no_server: true,
+                headless: false,
+            },
+        );
+
+        assert_eq!(
+            args(&command),
+            [
+                "run",
+                "-p",
+                "ars-e2e",
+                "--",
+                "widgets",
+                "--example",
+                "dioxus-tailwind",
+                "--port",
+                "5305",
+                "--webdriver-url",
+                "http://localhost:9516",
+                "--no-server",
+                "--headed",
+            ]
+        );
     }
 }

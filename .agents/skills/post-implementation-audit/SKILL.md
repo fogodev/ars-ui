@@ -119,8 +119,65 @@ This is a non-exhaustive checklist. Each round, walk through it explicitly:
     let id = props.id.unwrap_or(generated_id);
     ```
 
+- **Dioxus global attributes** — if a changed Dioxus component has
+  `#[props(extends = GlobalAttributes)]`, verify it does not also expose
+  explicit root `class`, `style`, `data-*`, `lang`, `tabindex`, or extra
+  `aria-*` props. Those attrs should flow through `attrs: Vec<Attribute>` and
+  merge with agnostic root attrs. Keep an explicit prop only for semantic
+  component data, non-root part attrs, typed HTML vocabularies, or documented
+  component-owned precedence/validation. Add or keep a test proving `class:`
+  and `style:` still work through global attrs.
+- **Compound part styling** — for multi-part components with visible internal
+  anatomy, verify the adapter exposes public compound parts for stylable
+  anatomy instead of adding repeated root-level `*_class` / `*_style` props.
+  Dioxus parts should use `GlobalAttributes`; Leptos parts should use reactive
+  `TextProp` class/style until a broader Leptos global-attrs surface exists.
+  Tailwind widget examples must style those public parts or use Tailwind
+  arbitrary variants over `data-ars-*` anatomy, not raw Rust string CSS.
+- **Styled source-template boundary** — verify checked-in closed-anatomy styled
+  component templates live in `ars-leptos-components` /
+  `ars-dioxus-components`, not in `ars-leptos` / `ars-dioxus`. Adapter crates
+  should expose unstyled primitives and core exports; styled crates should
+  compose those primitives and expose CSS and Tailwind variants when the
+  widget/demo contract needs both. Treat the styled crates as reference source
+  for the future `ars-ui` CLI, which copies editable component source into user
+  projects; do not accept package-only customization workarounds when copied
+  source or public primitives are the right boundary.
+- **Styled template layout** — verify styled source templates are organized
+  category-first under `src/<category>/<component>/`, with adjacent `.css`
+  files for CSS variants. Do not accept top-level variant-first trees such as
+  `css::checkbox` or `tailwind::checkbox`; those crates stage source for the
+  installer, so category-first paths should be the only public shape.
+- **CSS template documentation** — verify CSS variant files include comments
+  explaining the component parts and state selectors they style, so copied
+  component source is understandable and safely customizable.
+- **Tailwind template editability** — verify Tailwind source templates keep
+  class strings inline in the rendered `view!` / `rsx!` markup rather than
+  hiding them behind `const` identifiers. Inline classes preserve copied-source
+  editability and Tailwind-aware editor completion/canonical diagnostics.
+- **Styled template import boundary** — verify copied-source styled template
+  Rust files import only `ars_leptos::prelude::*` or
+  `ars_dioxus::prelude::*`. Do not accept direct imports from `leptos`,
+  `dioxus`, `ars_forms`, or deep adapter/foundation modules in those templates;
+  re-export user-facing helpers and prop types from the adapter prelude first.
+- **Prop conversion ergonomics** — verify user-facing callback, signal, text,
+  and view props use `#[prop(into)]` / `#[props(into)]` where supported, and
+  examples pass closures, signals, translated memos, elements, and view
+  closures directly instead of noisy `Callback::new`, `Signal::derive`,
+  `ViewFn::from`, `.into()`, or `EventHandler` wrappers unless a wrapper value
+  is intentionally reused or inference requires it.
 - **Workspace `spec/manifest.toml`** and **`foundation/02-component-catalog.md`** — is the new component registered and statused? (For brand-new components only.)
 - **Foundation specs** (`spec/foundation/00-*` through `spec/foundation/11-*`) — does the new code expose a missing shared abstraction worth promoting? CLAUDE.md `spec/CLAUDE.md` says: _"If an adapter-specific implementation exposes a missing shared abstraction, promote that abstraction into the appropriate foundation/shared spec."_
+- **Adapter semantic boundary** — inspect private helper functions in changed
+  adapter files and duplicated Leptos/Dioxus branches. Any helper that can be
+  unit-tested without framework types, browser handles, DOM refs, or renderer
+  APIs belongs in `ars-components` or a shared foundation crate. Do not accept
+  duplicated helpers that return or consume component `State`, `Event`, `Props`,
+  `AttrMap`, ids, validation errors, keyboard decisions, disabled/readonly
+  rules, or ARIA relationship decisions unless they are marked as adapter
+  rendering/framework glue with a concrete reason. Adapter-local extension
+  traits over agnostic `Api`, `Props`, `State`, or `Event` are drift; add the
+  method to the agnostic API instead.
 - **New crate dependencies** — was the user notified per CLAUDE.md's "Do not add a new dependency crate without explicit user approval first" rule? Did the implementation add `i18n`-style feature flags that warrant a CLAUDE.md note?
 - **`.cargo/mutants.toml`** — are any new equivalent mutations documented with justifications? (Phase 3 will validate this; surface it here if a mutation that _should_ be equivalent isn't documented yet.)
 
@@ -160,6 +217,15 @@ The canonical entry-prompt:
 | **Code coverage** (cargo llvm-cov + xtask wasm path) | Unreachable / under-tested code; threshold drift         | Use the right command for the crate (see "Procedure" below) — bare `cargo llvm-cov` does **not** measure adapter wasm code paths. Always finish with `cargo xtask coverage check-all --file <lcov>` to enforce the same thresholds CI does.                                                                                                                                                                                                                                                                                      |
 | **Adapter wasm browser tests** (wasm-bindgen-test)   | Framework adapter wiring that SSR cannot prove           | Required when the change touches `ars-leptos`, `ars-dioxus`, `ars-dom`, or `ars-i18n` (`web-intl` path) and behavior depends on a browser runtime. These should stay focused: DOM-mounted attrs, generated ids, relationship attrs, callback dispatch, form event prevention, focus/keyboard/pointer paths, reactive DOM updates, and mount cleanup. They are not full E2E parity proof. Treat coverage from the wasm path (`cargo xtask coverage wasm`) as the source of truth for these — not the host-target llvm-cov number. |
 | **E2E tests**                                        | User-visible workflows and counterpart outcome parity    | Required for adapter components with browser-observable behavior. E2E owns complete workflows, Leptos/Dioxus parity, computed visual feedback, axe-clean reached states, styled fixture/widget behavior, every supported reference outcome axis, and every UX/browser-review complaint from the session. A wasm test can support a parity row, but it cannot be the only proof unless the outcome is strictly low-level adapter/browser wiring.                                                                                  |
+
+For adapter components, add a dedicated composition integration audit before
+calling the test surface complete. If the component consumes `Form`, `Field`,
+`Fieldset`, provider, group, collection, or overlay context, verify tests cover
+the composed outcome with those foundations. For form controls, `Form` and
+`Fieldset` are mandatory: submit serialization, reset, inherited
+disabled/readonly/invalid, matching validation errors by `name`, unmatched
+errors ignored, and description/error relationship ordering must be covered
+across SSR/unit plus wasm or E2E where browser behavior is involved.
 
 For adapter E2E audits, build a complaint-to-regression map before calling the
 surface complete. Each browser comment or user-visible complaint must point to

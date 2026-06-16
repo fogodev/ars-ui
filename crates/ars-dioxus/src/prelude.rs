@@ -80,7 +80,7 @@ pub use dioxus::prelude::*;
 // re-export covers both the framework-agnostic types (`Props`, `Messages`,
 // `DismissReason`, …) and the Dioxus-side wrappers (`Handle`, `Region`,
 // `RegionProps`, `use_dismissable`).
-pub use crate::as_child;
+pub use crate::as_child::{self, AsChildSlot};
 // The `error_boundary` adapter module exposes the `ArsErrorBoundary`
 // wrapper component spec'd at
 // `spec/foundation/09-adapter-dioxus.md` §21. End users reach it as
@@ -96,9 +96,13 @@ pub use crate::utility::highlight::{self, Highlight};
 // `spec/dioxus-components/utility/ars-provider.md`.
 pub use crate::{ArsProvider, ArsProviderProps};
 // -- User-facing helpers --
-pub use crate::{Translatable, t, use_number_formatter};
+pub use crate::{Translatable, root_class_attrs, t, use_number_formatter, use_t};
 pub use crate::{
-    navigation::{self, tabs},
+    input::{self, checkbox},
+    navigation::{
+        self,
+        tabs::{self, Tabs},
+    },
     utility::{
         self,
         button::{self, Button, ButtonAsChild},

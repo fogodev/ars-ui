@@ -102,3 +102,72 @@ Read the appropriate reference file based on what you're working on:
 3. **Use `prop:value` for reactive inputs**, not the `value` attribute. The attribute only sets the initial value.
 4. **Avoid `usize`/`isize` in server function args** — WASM is 32-bit, server is 64-bit.
 5. **Component fns run once.** Put reactive logic in closures, not at the top level.
+
+## ars-ui Part Styling
+
+For multi-part ars-ui Leptos adapter components, prefer public compound part
+components over root-level `*_class` / `*_style` prop families. Each stylable
+part should expose reactive `class: Option<TextProp>` and
+`style: Option<TextProp>` until ars-leptos has a broader global-attributes
+surface. Merge those attrs with the agnostic part attrs. Tailwind examples
+should style public parts directly or with Tailwind arbitrary variants over
+`data-ars-*`; do not inject raw Rust string CSS for ordinary part styling.
+
+For machine-backed Leptos compound parts that only need agnostic part attrs plus
+consumer `class` / `style` props, use `UseMachineReturn::part_attrs` instead of
+writing a component-local part attr merger. Keep local merge code only when a
+part adds adapter-specific dynamic attrs, event handlers, refs, or
+renderer-only behavior.
+
+For Leptos compound parts that add local dynamic attrs before rendering, use the
+shared `apply_part_attrs` helper as the final step instead of reimplementing the
+consumer `class` / `style` merge and AttrMap conversion.
+
+For dynamic Leptos attrs derived from machine part `AttrMap`s, use
+`UseMachineReturn::attr_string_memo`,
+`UseMachineReturn::attr_optional_string_memo`, and
+`UseMachineReturn::attr_presence_memo`. Do not add per-component
+`root_attr_*_memo`, `input_attr_*_memo`, or `attr_*_memo` copies unless the
+derivation does more than read one `AttrMap` key.
+
+Adapter crates (`ars-leptos`) expose unstyled primitives only. Put checked-in
+closed-anatomy styled Leptos source templates in `ars-leptos-components`, with
+CSS and Tailwind variants when both distribution styles are needed. Styled
+templates should compose adapter primitives and may expose semantic props plus
+root `class`/`style`, but not per-part prop families. Treat these templates as
+the source for the future `ars-ui` CLI, which will copy editable component
+source into user projects; do not design them as the final customization
+boundary.
+
+Organize styled templates category-first under
+`src/<category>/<component>/`, for example
+`src/input/checkbox/css.rs`, `src/input/checkbox/tailwind.rs`, and an adjacent
+`src/input/checkbox/checkbox.css` for CSS variants. Do not add top-level
+variant-first module trees like `css::checkbox` or `tailwind::checkbox`.
+CSS variant files should include plain comments documenting which component
+part or state each selector styles, so copied source remains easy for users to
+customize.
+Tailwind source templates should keep class strings inline in the rendered
+`view!` markup rather than hiding them behind `const` identifiers, so copied
+source remains editable and Tailwind-aware editor extensions can provide
+completion and canonical-class diagnostics at the markup location.
+Because styled templates are copied into user applications, template Rust files
+must import ars-ui and framework APIs only with `use ars_leptos::prelude::*;`.
+Do not import directly from `leptos`, `ars_forms`, or deep `ars_leptos::*`
+modules in copied-source templates. If a template needs a helper or type,
+export it from the adapter prelude first and consume it from there.
+Use `#[prop(into)]` for Leptos callback, signal, text, and view props wherever
+the macro supports it. Examples and styled templates should pass closures,
+signals, translated memos, and view closures directly instead of spelling
+`Callback::new(...)`, `Signal::derive(...)`, `ViewFn::from(...)`, or `.into()`
+at each call site. Keep explicit wrapper locals only when reused across more
+than one prop or when type inference genuinely needs the help.
+
+Plain Leptos widgets should compose adapter primitives directly. CSS widgets
+should import CSS styled source templates, and Tailwind widgets should import
+Tailwind styled source templates. Do not use a CSS styled component inside the
+plain widget just for visual polish.
+Leptos widget examples should import adapter/framework APIs through
+`use ars_leptos::prelude::*;` as much as possible. Avoid direct `leptos::*` or
+deep `ars_leptos::*` imports in examples when the item is intentionally
+available from the adapter prelude.

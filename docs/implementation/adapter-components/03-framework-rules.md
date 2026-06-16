@@ -3,6 +3,35 @@
 These rules prevent adapter implementations from compiling but drifting from
 Leptos, Dioxus, or target behavior.
 
+## Adapter Semantic Boundary
+
+Adapters are rendering layers, not duplicate component engines. They may own
+framework-specific wiring: prop conversion, context reads, hook setup, DOM refs,
+event extraction, attr conversion, children/slot rendering, and callback
+dispatch.
+
+Move renderer-independent logic into `crates/ars-components` or a shared
+foundation crate before using it from adapters. A helper belongs outside the
+adapter when it decides component state, derives the next event outcome,
+interprets keyboard or pointer meaning, builds ARIA relationships, maps native
+form values, merges disabled/readonly/invalid semantics, selects validation
+errors, or computes ids/messages in a way both adapters need.
+
+Classify private adapter helpers when adding or reviewing them:
+
+- `renderer-glue`: needs Leptos/Dioxus attrs, views, events, hooks, refs, or
+  DOM handles;
+- `framework-context-merge`: reads adapter contexts and builds agnostic props;
+- `component-semantics`: move to the agnostic component module;
+- `foundation-semantics`: move to the relevant shared crate.
+
+Duplicated helper names in the Leptos and Dioxus implementation of the same
+component are a warning sign. Either move the logic to the agnostic layer or
+add a short marker comment before the helper, for example
+`// adapter-rendering-glue: needs framework event conversion`. Do not create
+adapter-local extension traits for agnostic APIs such as `Api`, `Props`,
+`State`, or `Event`; add the shared method to the agnostic API instead.
+
 ## Avoid Repeated Closure Clones
 
 When a per-instance value is captured by multiple closures:
@@ -49,6 +78,36 @@ Then manually review those same changed files for hooks inside conditionals,
 loops, iterator adapters, nested closures, and early-return branches. Fix the
 hook order first, then run the focused Dioxus checks.
 
+## Dioxus Global Attributes
+
+For Dioxus component props, `#[props(extends = GlobalAttributes)]` is the
+consumer escape hatch for root HTML attrs. Do not duplicate root `class`,
+`style`, `data-*`, `lang`, `tabindex`, or extra `aria-*` as explicit props when
+`GlobalAttributes` already accepts the same call-site syntax.
+
+Use explicit Dioxus props for semantic component inputs, non-root part attrs,
+typed HTML vocabularies, or attrs with component-owned validation/precedence.
+Otherwise forward the global attrs vector and merge it with agnostic root attrs
+using the adapter merge helper. Tests should prove `class:` and `style:` still
+work through global attrs rather than through bespoke props.
+
+For Dioxus multi-part components, apply the same rule to each public compound
+part. A stylable `Control`, `Indicator`, `Description`, or similar part should
+extend `GlobalAttributes` and merge those attrs with its agnostic part attrs.
+Do not add repeated explicit `control_class`, `indicator_style`, and similar
+props to the root component when a compound part API would let consumers style
+the part directly.
+
+Use `UseMachineReturn::part_attrs` for Dioxus machine-backed parts that only
+need agnostic part attrs plus consumer global attrs. Keep local merge code only
+when the part adds adapter-specific dynamic attrs, event handlers, refs, or
+renderer-only behavior.
+
+Tailwind examples should consume those public parts or use Tailwind arbitrary
+variants over `data-ars-*` state/anatomy. Raw `<style>` blocks or Rust string
+CSS in Tailwind widget crates are acceptable only for a documented Tailwind
+tooling limitation, not for ordinary component part styling.
+
 ## Reactive Context
 
 When reading provider signals during component construction, use an untracked
@@ -69,6 +128,25 @@ typed surface that adapter consumers and tests rely on.
 Use the adapter's reactive attribute helper for dynamic attrs instead of
 building stale one-time maps. Leptos components should use the local
 `memo_to_reactive_attrs` pattern where it applies.
+
+Use `UseMachineReturn::part_attrs` for Leptos machine-backed parts that only
+need agnostic part attrs plus consumer `class` / `style` props. Keep local
+merge code only when the part adds adapter-specific dynamic attrs, event
+handlers, refs, or renderer-only behavior.
+
+Use the shared `apply_part_attrs` helper as the final conversion step for
+Leptos compound parts that do need local dynamic attrs before rendering. The
+component may mutate the `AttrMap` for renderer-specific behavior, then hand it
+to `apply_part_attrs` for consumer `class` / `style` merging and Leptos attr
+conversion.
+
+Use the `UseMachineReturn::attr_string_memo`,
+`UseMachineReturn::attr_optional_string_memo`, and
+`UseMachineReturn::attr_presence_memo` methods when a Leptos component needs
+dynamic values from a machine-backed part. Do not add component-local
+`root_attr_*_memo`, `input_attr_*_memo`, or `attr_*_memo` copies unless the
+derivation includes component-specific renderer behavior beyond reading an
+`AttrMap` key.
 
 ## Effects
 

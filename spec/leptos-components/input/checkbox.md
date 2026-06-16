@@ -10,33 +10,89 @@ source_foundation: foundation/08-adapter-leptos.md
 
 ## 1. Purpose and Adapter Scope
 
-This spec maps the core [`Checkbox`](../../components/input/checkbox.md) contract onto a Leptos 0.8.x component. The adapter must preserve tri-state semantics, hidden-input form participation, and the built-in description and error-message parts.
+This spec maps the core [`Checkbox`](../../components/input/checkbox.md) contract onto Leptos 0.8.x unstyled primitive parts. The adapter must preserve tri-state semantics, hidden-input form participation, and the built-in description and error-message parts. Ready-made styled Checkbox source templates live in `ars-leptos-components`; the future `ars-ui` binary will copy those templates into user applications for source-owned customization.
 
 ## 2. Public Adapter API
 
 ```rust,no_check
 #[component]
-pub fn Checkbox(
+pub fn Root<T: 'static>(
+    #[prop(optional, into)] id: Option<Oco<'static, str>>,
     #[prop(optional, into)] checked: Option<Signal<checkbox::State>>,
     #[prop(optional)] default_checked: checkbox::State,
     #[prop(optional, into)] disabled: Signal<bool>,
     #[prop(optional, into)] readonly: Signal<bool>,
     #[prop(optional, into)] required: Signal<bool>,
     #[prop(optional, into)] invalid: Signal<bool>,
-    #[prop(optional)] name: Option<String>,
-    #[prop(optional)] value: Option<String>,
-    #[prop(optional)] form: Option<String>,
-    #[prop(optional)] children: Children,
+    #[prop(optional, into)] errors: Signal<Vec<ars_forms::validation::Error>>,
+    #[prop(optional, into)] name: Option<Oco<'static, str>>,
+    #[prop(optional, into)] value: Option<Oco<'static, str>>,
+    #[prop(optional, into)] form: Option<Oco<'static, str>>,
+    #[prop(optional)] has_description: bool,
+    #[prop(optional)] has_error_message: bool,
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+    #[prop(optional)] on_checked_change: Option<Callback<checkbox::State>>,
+    children: TypedChildren<T>,
+) -> impl IntoView
+
+#[component]
+pub fn Label<T: 'static>(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+    children: TypedChildren<T>,
+) -> impl IntoView
+
+#[component]
+pub fn Control<T: 'static>(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+    children: TypedChildren<T>,
+) -> impl IntoView
+
+#[component]
+pub fn Indicator(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+) -> impl IntoView
+
+#[component]
+pub fn HiddenInput(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+) -> impl IntoView
+
+#[component]
+pub fn Description<T: 'static>(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+    children: TypedChildren<T>,
+) -> impl IntoView
+
+#[component]
+pub fn ErrorMessage<T: 'static>(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+    children: TypedChildren<T>,
 ) -> impl IntoView
 ```
 
-The adapter also forwards the shared input props from the core contract, including IDs, locale or messages, and field integration data. `checked`, `disabled`, `readonly`, `required`, and `invalid` are the only props that should be treated as post-mount reactive by default.
+The adapter forwards the shared input props from the core contract through `Root`, including IDs, form integration data, validation errors, structural description/error presence, and root decoration. `checked`, `disabled`, `readonly`, `required`, `invalid`, `errors`, `class`, and `style` are treated as reactive Leptos inputs.
+
+The adapter does not expose a closed-anatomy styled `Checkbox` component.
+Widgets and reference examples that want a ready-made visual component use
+`ars_leptos_components::input::checkbox::{css, tailwind}::Checkbox`. Applications that
+need custom anatomy compose these primitives directly today, and should edit
+copied source once the future `ars-ui` binary installs the styled template into
+their project. Each stylable Leptos part exposes reactive `class` and `style`
+props with `TextProp` so consumers can style the part directly without adding
+root-level `*_class` / `*_style` prop families.
 
 ## 3. Mapping to Core Component Contract
 
 - Props parity: the adapter exposes the full core `Props` surface, including tri-state checked values and form-related props.
-- Event parity: `Toggle`, `Focus`, `Blur`, `SetChecked`, `SetDisabled`, `SetReadonly`, `SetInvalid`, and `SetRequired` remain machine-owned.
-- Core machine ownership: `use_machine::<checkbox::Machine>(...)` remains the single source of truth for ARIA state, hidden-input state, and label wiring.
+- Event parity: `Toggle`, `Focus`, `Blur`, `Check`, `Uncheck`, `Reset`, `SetValue`, `SetProps`, `SetHasDescription`, and `SetHasErrorMessage` remain machine-owned.
+- Core machine ownership: `use_machine_with_reactive_props::<checkbox::Machine>(...)` remains the single source of truth for ARIA state, hidden-input state, and label wiring.
 
 ## 4. Part Mapping
 
@@ -53,21 +109,26 @@ The adapter also forwards the shared input props from the core contract, includi
 ## 5. Attr Merge and Ownership Rules
 
 - Core ARIA, state, `tabindex`, `id`, `name`, `value`, and form attrs on `Control` or `HiddenInput` always win over consumer decoration.
-- `class` and `style` merge additively on `Root`, `Label`, and `Control`; consumer handlers compose after adapter handlers unless the adapter must prevent an invalid toggle.
+- `class` and raw inline `style` use `TextProp` and merge onto `Root`; consumer handlers compose after adapter handlers unless the adapter must prevent an invalid toggle.
+- Inner part styling should use public compound parts when the consumer needs direct classes/styles on parts. Tailwind consumers may also use arbitrary variants over stable component attrs such as `data-ars-part`, `data-ars-state`, `data-ars-disabled`, `data-ars-readonly`, and `data-ars-invalid`.
+- Do not add repeated root-level `control_class`, `indicator_style`, or similar props. Expose or extend a public compound part instead.
 - Consumers must not remove `aria-hidden` from `Indicator` or `HiddenInput`, and must not repurpose `HiddenInput` as a visible control.
 
 ## 6. Composition / Context Contract
 
-`Checkbox` is standalone, but it may optionally consume field or fieldset context for disabled, readonly, described-by, and validation wiring. Group behavior is owned by [`CheckboxGroup`](checkbox-group.md) rather than by implicit child inspection inside `Checkbox`.
+`Root` is standalone, but it consumes the shared adapter field-support helper when rendered under `Form` or `Fieldset`. Explicit props, named form validation errors, and inherited disabled, readonly, and invalid state are merged before constructing core `Props`. Group behavior is owned by [`CheckboxGroup`](checkbox-group.md) rather than by implicit child inspection inside `Root`.
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop           | Mode       | Sync trigger  | Machine event / update path  | Visible effect                                      |
-| ---------------------- | ---------- | ------------- | ---------------------------- | --------------------------------------------------- |
-| `checked`              | controlled | signal change | `SetChecked`                 | updates `aria-checked`, indicator, and hidden input |
-| `disabled`             | controlled | signal change | `SetDisabled`                | blocks interaction and updates disabled attrs       |
-| `readonly`             | controlled | signal change | `SetReadonly`                | preserves focusability but blocks mutation          |
-| `required` / `invalid` | controlled | signal change | `SetRequired` / `SetInvalid` | updates ARIA and described-by wiring                |
+| Adapter prop           | Mode       | Sync trigger  | Machine event / update path | Visible effect                                      |
+| ---------------------- | ---------- | ------------- | --------------------------- | --------------------------------------------------- |
+| `checked`              | controlled | signal change | `SetValue(Some(state))`     | updates `aria-checked`, indicator, and hidden input |
+| `disabled`             | controlled | signal change | `SetProps`                  | blocks interaction and updates disabled attrs       |
+| `readonly`             | controlled | signal change | `SetProps`                  | preserves focusability but blocks mutation          |
+| `required` / `invalid` | controlled | signal change | `SetProps`                  | updates ARIA and described-by wiring                |
+| `errors`               | controlled | signal change | `SetProps`                  | updates invalid state from validation errors        |
+| `has_description`      | structural | prop/render   | `SetHasDescription`         | updates `aria-describedby` before error message     |
+| `has_error_message`    | structural | prop/render   | `SetHasErrorMessage`        | gates `aria-errormessage` and error described-by    |
 
 User activation maps pointer or keyboard activation on `Control` to `Toggle`. The adapter should expose `on_checked_change`-style callbacks only after the machine accepts the transition.
 
@@ -93,7 +154,7 @@ User activation maps pointer or keyboard activation on `Control` to `Toggle`. Th
 
 - Checked-change callbacks emit the committed `checkbox::State`.
 - Focus callbacks may expose `is_keyboard` when the framework wrapper needs focus-visible behavior.
-- Field-level validation callbacks must observe machine state after described-by and invalid attrs are settled.
+- Field-level validation callbacks must observe machine state after described-by, error-message, and invalid attrs are settled.
 
 ## 12. Failure and Degradation Rules
 
@@ -161,10 +222,10 @@ The checkbox instance owns a single `Root` / `Control` / `HiddenInput` identity.
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept      | Required? | Responsibility                                              | Notes                                  |
-| ------------------- | --------- | ----------------------------------------------------------- | -------------------------------------- |
-| hidden-input helper | required  | mirror checked state and form attrs into the hidden input   | shared with `switch` and `radio-group` |
-| field merge helper  | required  | merge described-by, disabled, readonly, and invalid context | reuse utility-layer field integration  |
+| Helper concept      | Required? | Responsibility                                                 | Notes                                  |
+| ------------------- | --------- | -------------------------------------------------------------- | -------------------------------------- |
+| hidden-input helper | required  | mirror checked state and form attrs into the hidden input      | shared with `switch` and `radio-group` |
+| field merge helper  | required  | merge form errors plus disabled, readonly, and invalid context | reuse utility-layer field integration  |
 
 ## 23. Framework-Specific Behavior
 
@@ -173,7 +234,7 @@ Leptos should use `Signal<T>` watchers only for values that may change after mou
 ## 24. Canonical Implementation Sketch
 
 ```rust,no_check
-let machine = use_machine::<checkbox::Machine>(props);
+let machine = use_machine_with_reactive_props::<checkbox::Machine>(props_signal);
 let control_attrs = machine.derive(|api| api.control_attrs());
 let hidden_input_attrs = machine.derive(|api| api.hidden_input_attrs());
 
@@ -207,7 +268,7 @@ view! {
 ## 27. Accessibility and SSR Notes
 
 - `aria-describedby` must include `Description` first and `ErrorMessage` second when both exist.
-- `aria-errormessage` must only appear when invalid content is actually rendered.
+- `aria-errormessage` must only appear when the checkbox is invalid and invalid content is actually rendered.
 - SSR markup must not omit `HiddenInput`, because that would change the form-participation contract on hydration.
 
 ## 28. Parity Summary and Intentional Deviations
@@ -235,4 +296,5 @@ view! {
 - [ ] Synchronize controlled props through machine events, not local shadow state.
 - [ ] Preserve `Indeterminate` semantics in controlled mode.
 - [ ] Keep hidden-input submission and reset behavior adapter-owned.
-- [ ] Merge field-derived described-by, disabled, readonly, and invalid state.
+- [ ] Merge field-derived errors, disabled, readonly, and invalid state.
+- [ ] Register error message presence so invalid checkboxes do not emit dangling error IDREFs.

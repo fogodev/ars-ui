@@ -21,15 +21,15 @@ modules.
 
 ## Prelude Exports
 
-For user-facing components, re-export both:
+For unstyled adapter primitives, re-export:
 
 - the component module; and
-- the root component entry point.
+- the primitive part entry points that consumers compose directly.
 
 Example:
 
 ```rust
-pub use crate::data_display::{grid_list, grid_list::GridList};
+pub use crate::input::checkbox;
 ```
 
 Also re-export configuration types that consumers pass into props. If the
@@ -46,7 +46,12 @@ pub use ars_collections::selection::{
 Do not put machine internals, slot output internals, adapter hooks, or
 component-author-only helpers in the end-user prelude.
 
-Both adapter preludes must stay symmetric.
+Ready-made styled components do not belong in `ars-leptos` or `ars-dioxus`.
+The checked-in styled crates (`ars-leptos-components` and
+`ars-dioxus-components`) are the reference/source-template layer used by
+widgets, examples, tests, and the future source-distribution workflow. They may
+re-export their component modules from their own preludes. Both adapter
+preludes must stay symmetric.
 
 ## Public API Fidelity
 
@@ -98,9 +103,119 @@ so component-owned classes and reactive consumer classes end up in one final
 example-only class branching.
 
 Dioxus props must extend `GlobalAttributes` when the component exposes global
-HTML attributes to consumers.
+HTML attributes to consumers. Do not add explicit `class`, `style`, `data-*`,
+`lang`, `tabindex`, or extra `aria-*` props to Dioxus components when
+`GlobalAttributes` already captures them. Those attrs should flow through the
+`attrs: Vec<Attribute>` field and be merged with component-owned attrs at the
+root. Add an explicit Dioxus prop only when it is semantic component data, maps
+to a non-root part, or has a documented precedence/validation rule that cannot
+be expressed as a global attr.
 
 Avoid swallowing consumer classes or replacing them with fixed demo styling.
+
+### Multi-Part Components
+
+For components with visible internal anatomy, do not add a long series of
+`*_class` / `*_style` props for every part. That API scales poorly, makes the
+root component harder to read, and forces every framework to carry repetitive
+styling escape hatches.
+
+Prefer a compound-part API when consumers need to style internal anatomy:
+
+- keep adapter crates focused on unstyled primitives;
+- put checked-in closed-anatomy styled source templates in `ars-*-components`;
+- expose public part components for the rendered anatomy, such as `Root`,
+  `Control`, `Indicator`, `Description`, and `ErrorMessage`;
+- make each part consume the same agnostic machine/context as the convenience
+  component;
+- render roles, ARIA, ids, and `data-ars-*` attrs from the agnostic API, not
+  from the example;
+- let consumers pass normal framework attributes to each part.
+
+For Dioxus part components, use
+`#[props(extends = GlobalAttributes)] attrs: Vec<Attribute>` for each stylable
+part unless the part has a documented semantic reason to restrict attributes.
+For Leptos part components, expose `class: Option<TextProp>` and
+`style: Option<TextProp>` on stylable parts until the adapter has a broader
+global-attributes surface. Merge those attrs with the agnostic part attrs.
+
+Tailwind widget examples for multi-part components should style the public part
+components directly, or use Tailwind arbitrary variants over `data-ars-*`
+anatomy. Do not inject raw component CSS strings into Rust examples to style
+internal parts. If a demo cannot be written without raw CSS or private
+anatomy, promote the needed primitive part or add the styled wrapper to
+`ars-*-components` first.
+
+### Styled Source Templates
+
+Use `ars-leptos-components` and `ars-dioxus-components` for checked-in
+reference implementations of ready-made visual components inspired by React
+Spectrum outcomes. Each styled crate may expose CSS and Tailwind variants, for
+example `input::checkbox::css::Checkbox` and
+`input::checkbox::tailwind::Checkbox`, built by composing the adapter
+primitives.
+
+These crates are not the final customization boundary. They are the source of
+truth for the component source that the future `ars-ui` binary will copy into a
+user application, shadcn/ui style. Installed components should become
+user-owned files such as `src/components/ars/checkbox.rs` plus
+`src/components/ars/checkbox.css` for CSS variants, or a Rust file with static
+Tailwind classes for Tailwind variants. After installation, users customize the
+copied source directly.
+
+Organize styled templates by component category, not by styling system. The
+canonical crate layout is `src/<category>/<component>/`, for example
+`src/input/checkbox/css.rs`, `src/input/checkbox/tailwind.rs`, and
+`src/input/checkbox/checkbox.css`. CSS variants must have a real adjacent CSS
+file that can be copied with the component source. That CSS file must include
+plain comments documenting what each component part and state selector styles,
+so users who receive copied source can safely tweak the visual design. Do not
+add top-level variant-first module trees such as `css::checkbox` or
+`tailwind::checkbox`. Those crates are source-template staging areas for the
+future installer, so category-first paths should be the only public shape.
+
+Tailwind source templates should keep class strings inline on the rendered
+elements instead of hiding them behind `const` identifiers. Inline strings make
+the copied component source easier to edit and allow Tailwind-aware editor
+extensions to provide completion, hover, and class validation at the exact
+markup location. Use helper functions only for semantic logic; do not move
+ordinary Tailwind class lists out of the component markup.
+
+Styled source templates may expose semantic props and root-level customization
+(`class`/`style` for Leptos, `GlobalAttributes` for Dioxus), but they should
+not grow per-part prop families. Consumers who need deep styling before the
+CLI exists should compose adapter primitives directly. Once the CLI exists,
+deep customization should happen by editing copied component source instead of
+wrapping a closed package component.
+
+Because styled templates are copied into user applications, each template Rust
+file must import framework and ars-ui APIs only through the matching adapter
+prelude:
+
+```rust
+use ars_leptos::prelude::*;
+```
+
+or:
+
+```rust
+use ars_dioxus::prelude::*;
+```
+
+Do not import directly from `leptos`, `dioxus`, `ars_forms`, deep adapter
+modules such as `ars_leptos::input::checkbox`, or other foundation crates in a
+styled template. If copied component source needs a type or helper, re-export
+the user-facing item from the adapter prelude first and then consume it from
+there. This keeps installed components easy to paste into ordinary
+applications with one adapter dependency and one predictable import.
+
+Plain widgets (`examples/widgets-leptos` and `examples/widgets-dioxus`) should
+demonstrate the unstyled adapter primitives directly. They are the reference
+for component anatomy and primitive composition, not visual polish. CSS widgets
+should import the CSS styled source templates from `ars-*-components`, and
+Tailwind widgets should import the Tailwind styled source templates. Do not use
+the CSS styled component in the plain widget just to make it look better; that
+blurs the primitive/styled-source boundary.
 
 When a merge helper needs to inspect an existing `AttrMap` value and then
 overwrite that same key, use `AttrMap::take()` instead of `get()` plus a clone.
@@ -113,6 +228,17 @@ builds the merged reactive value, and sets the key once.
 Annotate `String` and `Option<String>` props with `#[prop(into)]` when the
 framework supports it and the local adapter convention uses it.
 
+Prefer `#[prop(into)]` / `#[props(into)]` for user-facing callback, signal,
+memo, text, and view props whenever the framework macro supports the
+conversion. Call sites should pass closures, signals, translated memos, and
+view closures directly instead of wrapping them with `Callback::new(...)`,
+`Signal::derive(...)`, `ViewFn::from(...)`, `.into()`, or `EventHandler`
+constructors. Keep explicit wrappers only when a value is intentionally shared
+across multiple props, stored as a reusable local, or the macro cannot infer
+the conversion clearly. Wrapper/styled components should also forward optional
+callback props as `Option<Callback<_>>` / `Option<EventHandler<_>>` instead of
+creating no-op defaults just to satisfy a child component.
+
 Keep semantic data separate from rendered views. Rich framework views are useful
 for customization, but components still need semantic sources for accessible
 names, ids, announcements, form serialization, and state-machine wiring.
@@ -124,6 +250,16 @@ announcements, empty-state text, and semantic labels behind custom views. The
 public `t(...)` helper returns `Memo<String>`, which converts into
 `TextProp`, so examples and widgets should pass `t(MessageKey)` without a
 parallel helper.
+
+For Dioxus adapter APIs and widgets, use the hookless `t(MessageKey)` helper as
+the default inline translation path. It reads the current `ArsProvider` context
+without consuming a hook slot, so it is safe inside conditional `rsx!` branches,
+iterator closures, and small render expressions while still subscribing to
+locale and signal-backed message reads during render. Use `use_t(MessageKey)`
+only when the component needs a reusable `Memo<String>` handle, such as a value
+stored for repeated use in the same render path or passed into an API that
+expects a memo. Because `use_t` is a hook, call it unconditionally at the top
+level of the component before conditional rendering.
 
 Resolve component message bundles together with the locale used to select them.
 Leptos uses `use_messages_and_locale(...) -> Signal<(M, Locale)>`; Dioxus uses

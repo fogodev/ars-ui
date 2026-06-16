@@ -491,15 +491,22 @@ fn strip_dynamic_root_attrs(attrs: &mut AttrMap) {
     }
 }
 
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "Api method references are not general enough for part attr callbacks."
+)]
 fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<button::Machine>) {
-    let state = root_attr_string_memo(machine, HtmlAttr::Data("ars-state"));
-    let loading = root_attr_bool_memo(machine, HtmlAttr::Data("ars-loading"));
-    let disabled = root_attr_bool_memo(machine, HtmlAttr::Data("ars-disabled"));
-    let focus_visible = root_attr_bool_memo(machine, HtmlAttr::Data("ars-focus-visible"));
-    let pressed = root_attr_bool_memo(machine, HtmlAttr::Data("ars-pressed"));
-    let html_disabled = root_attr_bool_memo(machine, HtmlAttr::Disabled);
-    let busy = root_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Busy));
-    let aria_disabled = root_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Disabled));
+    let state = machine.attr_string_memo(|api| api.root_attrs(), HtmlAttr::Data("ars-state"));
+    let loading = machine.attr_presence_memo(|api| api.root_attrs(), HtmlAttr::Data("ars-loading"));
+    let disabled =
+        machine.attr_presence_memo(|api| api.root_attrs(), HtmlAttr::Data("ars-disabled"));
+    let focus_visible =
+        machine.attr_presence_memo(|api| api.root_attrs(), HtmlAttr::Data("ars-focus-visible"));
+    let pressed = machine.attr_presence_memo(|api| api.root_attrs(), HtmlAttr::Data("ars-pressed"));
+    let html_disabled = machine.attr_presence_memo(|api| api.root_attrs(), HtmlAttr::Disabled);
+    let busy = machine.attr_presence_memo(|api| api.root_attrs(), HtmlAttr::Aria(AriaAttr::Busy));
+    let aria_disabled =
+        machine.attr_presence_memo(|api| api.root_attrs(), HtmlAttr::Aria(AriaAttr::Disabled));
 
     attrs
         .set(
@@ -534,25 +541,6 @@ fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<
             HtmlAttr::Aria(AriaAttr::Disabled),
             AttrValue::reactive_bool(move || aria_disabled.get()),
         );
-}
-
-fn root_attr_string_memo(
-    machine: crate::UseMachineReturn<button::Machine>,
-    attr: HtmlAttr,
-) -> Memo<String> {
-    machine.derive(move |api| {
-        api.root_attrs()
-            .get(&attr)
-            .map(str::to_owned)
-            .unwrap_or_default()
-    })
-}
-
-fn root_attr_bool_memo(
-    machine: crate::UseMachineReturn<button::Machine>,
-    attr: HtmlAttr,
-) -> Memo<bool> {
-    machine.derive(move |api| api.root_attrs().contains(&attr))
 }
 
 fn filter_native_button_attrs(attrs: &mut AttrMap) {

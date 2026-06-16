@@ -31,6 +31,7 @@ Cover:
 - controlled and uncontrolled state synchronization;
 - callbacks and action dispatch;
 - native links, forms, and hidden inputs where supported;
+- composition with every foundation context the component consumes;
 - consumer class/global-attribute forwarding;
 - empty state and loading sentinel output where supported.
 
@@ -72,6 +73,12 @@ Do not turn wasm tests into a duplicate of the E2E suite. If the assertion is
 about full user workflows, styled example parity, computed visual feedback,
 cross-adapter UX comparison, axe across reached states, or reference-outcome
 coverage, put it in E2E/widget/browser parity evidence instead.
+
+For form controls, adapter tests must include composition scenarios with
+`Form` and `Fieldset`. SSR/unit tests should assert merged disabled, readonly,
+invalid, validation-error, description, and error IDREF output. Wasm tests
+should assert submit/reset behavior, DOM checked/value properties, and state
+updates after validation changes.
 
 Prefer `ars-test-harness-leptos`, `ars-test-harness-dioxus`, and shared
 `ars-test-harness` helpers instead of bespoke browser scaffolding.

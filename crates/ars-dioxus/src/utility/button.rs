@@ -14,10 +14,8 @@ pub use ars_interactions::{PressEvent, PressEventType};
 use dioxus::{dioxus_core::AttributeValue, prelude::*};
 
 use crate::{
-    as_child::{AsChildRenderProps, merge_dioxus_attrs},
-    attr_map_to_dioxus_inline_attrs, use_machine,
-    use_machine::UseMachineReturn,
-    use_stable_id,
+    as_child::AsChildRenderProps, attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs, use_machine,
+    use_machine::UseMachineReturn, use_stable_id,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

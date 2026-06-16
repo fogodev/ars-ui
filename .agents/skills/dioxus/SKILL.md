@@ -66,6 +66,82 @@ use_effect(move || {
 });
 ```
 
+## ars-ui Translation Helpers
+
+In `ars-dioxus`, prefer `t(MessageKey)` for ordinary inline translated text.
+It is intentionally hookless: it reads `ArsProvider` context without consuming a
+Dioxus hook slot, so it is safe inside conditional `rsx!` branches, iterator
+closures, and render expressions. It still reads locale and signal-backed
+message values reactively during render.
+
+Use `use_t(MessageKey)` only when you need a reusable `Memo<String>`, such as a
+translation passed to an API that stores a memo or an expensive parameterized
+translation used repeatedly. Because `use_t` is a hook, call it
+unconditionally at component top level.
+
+## ars-ui Global Attributes
+
+For ars-ui Dioxus adapter components, prefer
+`#[props(extends = GlobalAttributes)] attrs: Vec<Attribute>` as the root HTML
+attribute surface. Do not add explicit root `class`, `style`, `data-*`, `lang`,
+`tabindex`, or extra `aria-*` props when global attributes already support the
+same call-site syntax. Keep explicit props only for semantic component data,
+typed vocabularies, non-root part attrs, or documented component-owned
+precedence/validation. Tests should prove `class:` and `style:` forwarding
+through global attrs when a component supports consumer styling.
+
+For multi-part ars-ui components, prefer public compound part components over
+root-level `*_class` / `*_style` prop families. Each stylable Dioxus part should
+also use `#[props(extends = GlobalAttributes)]` and merge those attrs with the
+agnostic part attrs. Tailwind examples should style those public parts directly
+or with Tailwind arbitrary variants over `data-ars-*`; do not inject raw Rust
+string CSS for ordinary part styling.
+
+For machine-backed Dioxus compound parts that only need agnostic part attrs plus
+consumer global attrs, use `UseMachineReturn::part_attrs` instead of writing a
+component-local part attr merger. Keep local merge code only when a part adds
+adapter-specific dynamic attrs, event handlers, refs, or renderer-only behavior.
+
+Adapter crates (`ars-dioxus`) expose unstyled primitives only. Put checked-in
+closed-anatomy styled Dioxus source templates in `ars-dioxus-components`, with
+CSS and Tailwind variants when both distribution styles are needed. Styled
+templates should compose adapter primitives and may expose semantic props plus
+root `GlobalAttributes`, but not per-part prop families. Treat these templates
+as the source for the future `ars-ui` CLI, which will copy editable component
+source into user projects; do not design them as the final customization
+boundary.
+
+Organize styled templates category-first under
+`src/<category>/<component>/`, for example
+`src/input/checkbox/css.rs`, `src/input/checkbox/tailwind.rs`, and an adjacent
+`src/input/checkbox/checkbox.css` for CSS variants. Do not add top-level
+variant-first module trees like `css::checkbox` or `tailwind::checkbox`.
+CSS variant files should include plain comments documenting which component
+part or state each selector styles, so copied source remains easy for users to
+customize.
+Tailwind source templates should keep class strings inline in the rendered
+`rsx!` markup rather than hiding them behind `const` identifiers, so copied
+source remains editable and Tailwind-aware editor extensions can provide
+completion and canonical-class diagnostics at the markup location.
+Because styled templates are copied into user applications, template Rust files
+must import ars-ui and framework APIs only with `use ars_dioxus::prelude::*;`.
+Do not import directly from `dioxus`, `ars_forms`, or deep `ars_dioxus::*`
+modules in copied-source templates. If a template needs a helper or type,
+export it from the adapter prelude first and consume it from there.
+Use `#[props(into)]` for Dioxus callback, text, and view-like props wherever
+the macro supports it. Examples and styled templates should pass closures and
+elements directly instead of spelling `EventHandler` wrappers or `.into()` at
+each call site unless a reusable local or inference boundary requires it.
+
+Plain Dioxus widgets should compose adapter primitives directly. CSS widgets
+should import CSS styled source templates, and Tailwind widgets should import
+Tailwind styled source templates. Do not use a CSS styled component inside the
+plain widget just for visual polish.
+Dioxus widget examples should import adapter/framework APIs through
+`use ars_dioxus::prelude::*;` as much as possible. Avoid direct `dioxus::*` or
+deep `ars_dioxus::*` imports in examples when the item is intentionally
+available from the adapter prelude.
+
 ## Reference Files
 
 Read the appropriate reference file based on what you're working on:

@@ -10,7 +10,7 @@ use ars_core::{
     PlatformEffects, StyleStrategy, resolve_messages as core_resolve_messages,
 };
 use ars_i18n::{Direction, IntlBackend, Locale, StubIntlBackend, Translate, locales, number};
-use dioxus::prelude::*;
+use dioxus::{dioxus_core::try_consume_context, prelude::*};
 
 use crate::{
     nonce::{ArsNonceStyle, use_nonce_css_context_provider},
@@ -413,7 +413,9 @@ pub fn use_direction() -> Memo<Direction> {
 /// hand-rolling the `Option` + provider fallback chain.
 #[must_use]
 pub fn resolve_locale(adapter_props_locale: Option<Locale>) -> Locale {
-    adapter_props_locale.unwrap_or_else(|| use_locale().read().clone())
+    let provider_locale = use_locale();
+
+    adapter_props_locale.unwrap_or_else(|| provider_locale.cloned())
 }
 
 /// Resolves a memoized number formatter from the current provider locale.
@@ -558,17 +560,13 @@ where
     }
 }
 
-/// Resolves application-owned translatable text into a Dioxus string.
-#[must_use]
-pub fn t<T>(msg: impl Into<Translatable<T>>) -> String
+fn translate_with_current_context<T>(caller: &str, msg: &Translatable<T>) -> String
 where
     T: Translate + 'static,
 {
-    let msg = msg.into();
-
-    try_use_context::<ArsContext>().map_or_else(
+    try_consume_context::<ArsContext>().map_or_else(
         || {
-            warn_missing_provider("t");
+            warn_missing_provider(caller);
 
             let fallback = locales::en_us();
 
@@ -576,6 +574,42 @@ where
         },
         |ctx| msg.translate(&ctx.locale.read(), &*ctx.intl_backend),
     )
+}
+
+/// Resolves application-owned translatable text into a Dioxus string.
+///
+/// This is the ergonomic helper for application and widget render code. It is
+/// intentionally not a Dioxus hook: it uses Dioxus' non-hook context read and
+/// can therefore be called inside conditional `rsx!` branches, iterator
+/// closures, and other render expressions without changing hook order. When
+/// called during render, the provider locale signal is still read reactively, so
+/// locale changes rerender the caller with the updated translation.
+#[must_use]
+pub fn t<T>(msg: impl Into<Translatable<T>>) -> String
+where
+    T: Translate + 'static,
+{
+    let msg = msg.into();
+
+    translate_with_current_context("t", &msg)
+}
+
+/// Returns a memoized translation for application-owned text.
+///
+/// Use this when a component needs a reusable reactive handle, for example to
+/// pass translated text into an API that stores a [`Memo<String>`] or to avoid
+/// recomputing a costly parameterized translation during a hot render path. For
+/// ordinary inline text, prefer [`t`]: it is hookless and safe inside
+/// conditional `rsx!` branches. Because `use_t` is a Dioxus hook, call it only
+/// unconditionally at the top level of a component.
+#[must_use]
+pub fn use_t<T>(msg: impl Into<Translatable<T>>) -> Memo<String>
+where
+    T: Translate + 'static,
+{
+    let msg = msg.into();
+
+    use_memo(move || translate_with_current_context("use_t", &msg))
 }
 
 #[cfg(test)]
@@ -1205,15 +1239,99 @@ mod tests {
     }
 
     #[test]
+    fn t_can_be_called_conditionally_before_later_hooks() {
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn app(state: Rc<RefCell<(bool, Vec<String>)>>) -> Element {
+            use_context_provider(|| {
+                test_context(
+                    Locale::parse("es-ES").expect("locale should parse"),
+                    Arc::new(TestIntlBackend),
+                )
+            });
+
+            if state.borrow().0 {
+                state.borrow_mut().1.push(t(AppText::Greeting));
+            }
+
+            let stable_hook_after_t = use_signal(|| String::from("after"));
+
+            state.borrow_mut().1.push(format!(
+                "{}:{}",
+                t(AppText::Greeting),
+                stable_hook_after_t()
+            ));
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let state = Rc::new(RefCell::new((false, Vec::new())));
+
+        let mut dom = VirtualDom::new_with_props(app, Rc::clone(&state));
+
+        dom.rebuild_in_place();
+
+        state.borrow_mut().0 = true;
+
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate(&mut NoOpMutations);
+
+        assert_eq!(
+            state.borrow().1.as_slice(),
+            ["Hola:after", "Hola", "Hola:after"]
+        );
+    }
+
+    #[test]
+    fn use_t_memoizes_translated_text_for_render() {
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "Dioxus root props are moved into the render function."
+        )]
+        fn app(outputs: Rc<RefCell<Vec<String>>>) -> Element {
+            use_context_provider(|| {
+                test_context(
+                    Locale::parse("es-ES").expect("locale should parse"),
+                    Arc::new(TestIntlBackend),
+                )
+            });
+
+            let greeting = use_t(AppText::Greeting);
+
+            outputs.borrow_mut().push(greeting());
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let outputs = Rc::new(RefCell::new(Vec::new()));
+
+        let mut dom = VirtualDom::new_with_props(app, Rc::clone(&outputs));
+
+        dom.rebuild_in_place();
+
+        assert_eq!(outputs.borrow().as_slice(), ["Hola"]);
+    }
+
+    #[test]
     fn prelude_exports_compile() {
         fn app() -> Element {
-            use crate::prelude::use_number_formatter as prelude_use_number_formatter;
+            use crate::prelude::{
+                use_number_formatter as prelude_use_number_formatter, use_t as prelude_use_t,
+            };
 
             let ctx = test_context(locales::en_us(), Arc::new(StubIntlBackend));
 
             use_context_provider(|| ctx);
 
             drop(t(AppText::Greeting));
+
+            let _ = prelude_use_t(AppText::Greeting);
 
             let _ = prelude_use_number_formatter(number::FormatOptions::default);
 

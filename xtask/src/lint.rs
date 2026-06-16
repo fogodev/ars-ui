@@ -20,8 +20,64 @@ pub struct AdapterParityOptions {
     /// Directory containing Dioxus adapter tests.
     pub dioxus_test_dir: PathBuf,
 
+    /// Directory containing Leptos adapter source modules.
+    pub leptos_src_dir: PathBuf,
+
+    /// Directory containing Dioxus adapter source modules.
+    pub dioxus_src_dir: PathBuf,
+
+    /// Directory containing Leptos widget examples.
+    pub leptos_widgets_dir: PathBuf,
+
+    /// Directory containing Dioxus widget examples.
+    pub dioxus_widgets_dir: PathBuf,
+
+    /// Directory containing Leptos CSS widget examples.
+    pub leptos_css_widgets_dir: PathBuf,
+
+    /// Directory containing Dioxus CSS widget examples.
+    pub dioxus_css_widgets_dir: PathBuf,
+
+    /// Directory containing Leptos Tailwind widget examples.
+    pub leptos_tailwind_widgets_dir: PathBuf,
+
+    /// Directory containing Dioxus Tailwind widget examples.
+    pub dioxus_tailwind_widgets_dir: PathBuf,
+
+    /// Directory containing Leptos E2E fixtures.
+    pub leptos_e2e_fixture_dir: PathBuf,
+
+    /// Directory containing Dioxus E2E fixtures.
+    pub dioxus_e2e_fixture_dir: PathBuf,
+
+    /// Directory containing E2E harness modules.
+    pub e2e_src_dir: PathBuf,
+
     /// Maximum allowed per-component test-count delta.
     pub tolerance: usize,
+}
+
+impl AdapterParityOptions {
+    /// Build adapter parity options for the current workspace layout.
+    #[must_use]
+    pub fn workspace_defaults() -> Self {
+        Self {
+            leptos_test_dir: PathBuf::from("crates/ars-leptos/tests"),
+            dioxus_test_dir: PathBuf::from("crates/ars-dioxus/tests"),
+            leptos_src_dir: PathBuf::from("crates/ars-leptos/src"),
+            dioxus_src_dir: PathBuf::from("crates/ars-dioxus/src"),
+            leptos_widgets_dir: PathBuf::from("examples/widgets-leptos"),
+            dioxus_widgets_dir: PathBuf::from("examples/widgets-dioxus"),
+            leptos_css_widgets_dir: PathBuf::from("examples/widgets-leptos-css"),
+            dioxus_css_widgets_dir: PathBuf::from("examples/widgets-dioxus-css"),
+            leptos_tailwind_widgets_dir: PathBuf::from("examples/widgets-leptos-tailwind"),
+            dioxus_tailwind_widgets_dir: PathBuf::from("examples/widgets-dioxus-tailwind"),
+            leptos_e2e_fixture_dir: PathBuf::from("crates/ars-e2e/fixtures/leptos"),
+            dioxus_e2e_fixture_dir: PathBuf::from("crates/ars-e2e/fixtures/dioxus"),
+            e2e_src_dir: PathBuf::from("crates/ars-e2e/src"),
+            tolerance: 2,
+        }
+    }
 }
 
 /// Options for snapshot-count linting.
@@ -127,22 +183,56 @@ impl From<manifest::Error> for Error {
 pub fn check_adapter_parity(options: &AdapterParityOptions) -> Result<String, Error> {
     let root = manifest::SpecRoot::discover(&std::env::current_dir()?)?;
 
-    let components = root
+    let manifest_components = root
         .manifest
         .components
         .keys()
         .map(|name| name.replace('-', "_"))
         .collect::<BTreeSet<_>>();
+    let component_categories = manifest_component_categories(&root.manifest);
+
+    let implemented =
+        implemented_adapter_components(&options.leptos_src_dir, &options.dioxus_src_dir)?;
+
+    let components = manifest_components
+        .intersection(&implemented)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let documented = documented_adapter_components()?;
+    let sketched = counterpart_sketch_components(&manifest_components)?;
+    let workflow_scope = documented
+        .union(&sketched)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let workflow_components = components
+        .intersection(&workflow_scope)
+        .cloned()
+        .collect::<BTreeSet<_>>();
 
     let leptos_counts = adapter_test_counts(&options.leptos_test_dir, &components)?;
+
     let dioxus_counts = adapter_test_counts(&options.dioxus_test_dir, &components)?;
 
-    let (mut output, failures) = adapter_parity_report(
+    let presence = adapter_component_presence(
+        options,
+        &workflow_components,
+        &documented,
+        &component_categories,
+    )?;
+
+    let (mut output, parity_failures) = adapter_parity_report(
         &components,
         &leptos_counts,
         &dioxus_counts,
         options.tolerance,
+        &presence,
     );
+    let mut failures = parity_failures;
+
+    failures.extend(adapter_semantic_boundary_failures(
+        options,
+        &workflow_components,
+    )?);
 
     if failures.is_empty() {
         Ok(output)
@@ -162,6 +252,7 @@ fn adapter_parity_report(
     leptos_counts: &BTreeMap<String, usize>,
     dioxus_counts: &BTreeMap<String, usize>,
     tolerance: usize,
+    presence: &BTreeMap<String, AdapterComponentPresence>,
 ) -> (String, Vec<String>) {
     let mut output = String::from("Component | Leptos | Dioxus | Delta | Status\n");
 
@@ -182,15 +273,21 @@ fn adapter_parity_report(
             failures.push(format!(
                 "{component}: both adapters must have tests, leptos={leptos}, dioxus={dioxus}"
             ));
+
             "FAIL"
         } else if delta > tolerance {
             failures.push(format!(
                 "{component}: leptos={leptos}, dioxus={dioxus}, delta={delta}, tolerance={tolerance}"
             ));
+
             "FAIL"
         } else {
             "OK"
         };
+
+        if let Some(presence) = presence.get(component) {
+            failures.extend(presence.failures(component));
+        }
 
         writeln!(
             output,
@@ -397,13 +494,9 @@ fn adapter_test_counts(
         return Ok(BTreeMap::new());
     }
 
-    let test_attr = Regex::new(r"#\[\s*(?:wasm_bindgen_)?test\s*(?:\([^)]*\))?\s*\]")?;
+    let test_attr = adapter_test_attr_regex()?;
 
-    let files = collect_files(dir, |path| {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("test_") && name.ends_with(".rs"))
-    })?;
+    let files = collect_files(dir, is_adapter_test_file)?;
 
     let mut counts = BTreeMap::new();
 
@@ -420,6 +513,657 @@ fn adapter_test_counts(
     }
 
     Ok(counts)
+}
+
+fn adapter_file_has_tests(content: &str) -> bool {
+    adapter_test_attr_regex().is_ok_and(|test_attr| test_attr.find(content).is_some())
+}
+
+fn adapter_test_attr_regex() -> Result<Regex, Error> {
+    Ok(Regex::new(
+        r"#\[\s*(?:wasm_bindgen_)?test\s*(?:\([^)]*\))?\s*\]",
+    )?)
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct AdapterComponentPresence {
+    usage_docs: bool,
+    leptos_ssr_test: bool,
+    dioxus_ssr_test: bool,
+    leptos_wasm_test: bool,
+    dioxus_wasm_test: bool,
+    leptos_composition_test: bool,
+    dioxus_composition_test: bool,
+    all_widgets: bool,
+    leptos_e2e_fixture: bool,
+    dioxus_e2e_fixture: bool,
+    e2e_harness: bool,
+    requires_composition: bool,
+    requires_wasm: bool,
+}
+
+impl AdapterComponentPresence {
+    fn failures(&self, component: &str) -> Vec<String> {
+        let mut failures = Vec::new();
+
+        for (label, present) in [
+            ("usage documentation", self.usage_docs),
+            ("Leptos SSR/unit test", self.leptos_ssr_test),
+            ("Dioxus SSR/unit test", self.dioxus_ssr_test),
+            ("all six widget examples", self.all_widgets),
+            ("Leptos E2E fixture", self.leptos_e2e_fixture),
+            ("Dioxus E2E fixture", self.dioxus_e2e_fixture),
+            ("E2E harness", self.e2e_harness),
+        ] {
+            if !present {
+                failures.push(format!("{component}: missing {label}"));
+            }
+        }
+
+        if self.requires_wasm {
+            for (label, present) in [
+                ("Leptos wasm test", self.leptos_wasm_test),
+                ("Dioxus wasm test", self.dioxus_wasm_test),
+            ] {
+                if !present {
+                    failures.push(format!("{component}: interactive adapter missing {label}"));
+                }
+            }
+        }
+
+        if self.requires_composition {
+            for (label, present) in [
+                (
+                    "Leptos Form/Fieldset composition test",
+                    self.leptos_composition_test,
+                ),
+                (
+                    "Dioxus Form/Fieldset composition test",
+                    self.dioxus_composition_test,
+                ),
+            ] {
+                if !present {
+                    failures.push(format!(
+                        "{component}: context-integrated adapter missing {label}"
+                    ));
+                }
+            }
+        }
+
+        failures
+    }
+}
+
+fn adapter_component_presence(
+    options: &AdapterParityOptions,
+    components: &BTreeSet<String>,
+    documented: &BTreeSet<String>,
+    component_categories: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, AdapterComponentPresence>, Error> {
+    let mut result = BTreeMap::new();
+
+    for component in components {
+        let requires_wasm = component_requires_wasm(&options.leptos_src_dir, component)?
+            || component_requires_wasm(&options.dioxus_src_dir, component)?;
+        let requires_composition =
+            component_requires_composition(&options.leptos_src_dir, component)?
+                || component_requires_composition(&options.dioxus_src_dir, component)?;
+
+        let leptos_ssr = adapter_test_path(&options.leptos_test_dir, component, false);
+        let dioxus_ssr = adapter_test_path(&options.dioxus_test_dir, component, false);
+        let leptos_wasm = adapter_test_path(&options.leptos_test_dir, component, true);
+        let dioxus_wasm = adapter_test_path(&options.dioxus_test_dir, component, true);
+
+        let leptos_ssr_content = read_optional(&leptos_ssr)?;
+        let dioxus_ssr_content = read_optional(&dioxus_ssr)?;
+        let leptos_wasm_content = read_optional(&leptos_wasm)?;
+        let dioxus_wasm_content = read_optional(&dioxus_wasm)?;
+
+        result.insert(
+            component.clone(),
+            AdapterComponentPresence {
+                usage_docs: documented.contains(component),
+                leptos_ssr_test: leptos_ssr_content
+                    .as_deref()
+                    .is_some_and(adapter_file_has_tests),
+                dioxus_ssr_test: dioxus_ssr_content
+                    .as_deref()
+                    .is_some_and(adapter_file_has_tests),
+                leptos_wasm_test: leptos_wasm_content
+                    .as_deref()
+                    .is_some_and(adapter_file_has_tests),
+                dioxus_wasm_test: dioxus_wasm_content
+                    .as_deref()
+                    .is_some_and(adapter_file_has_tests),
+                leptos_composition_test: leptos_ssr_content
+                    .as_deref()
+                    .is_some_and(has_composition_test),
+                dioxus_composition_test: dioxus_ssr_content
+                    .as_deref()
+                    .is_some_and(has_composition_test),
+                all_widgets: all_widget_category_files_exist(
+                    options,
+                    component_categories,
+                    component,
+                ),
+                leptos_e2e_fixture: e2e_fixture_exists(
+                    &options.leptos_e2e_fixture_dir,
+                    component_categories,
+                    component,
+                ),
+                dioxus_e2e_fixture: e2e_fixture_exists(
+                    &options.dioxus_e2e_fixture_dir,
+                    component_categories,
+                    component,
+                ),
+                e2e_harness: e2e_harness_exists(
+                    &options.e2e_src_dir,
+                    component_categories,
+                    component,
+                ),
+                requires_composition,
+                requires_wasm,
+            },
+        );
+    }
+
+    Ok(result)
+}
+
+fn adapter_semantic_boundary_failures(
+    options: &AdapterParityOptions,
+    components: &BTreeSet<String>,
+) -> Result<Vec<String>, Error> {
+    let mut failures = Vec::new();
+
+    for component in components {
+        let leptos_path = component_module_path(&options.leptos_src_dir, component);
+        let dioxus_path = component_module_path(&options.dioxus_src_dir, component);
+
+        let Some(leptos_content) = read_optional(&leptos_path)? else {
+            continue;
+        };
+
+        let Some(dioxus_content) = read_optional(&dioxus_path)? else {
+            continue;
+        };
+
+        failures.extend(adapter_api_extension_trait_failures(
+            component,
+            &leptos_path,
+            &leptos_content,
+        )?);
+
+        failures.extend(adapter_api_extension_trait_failures(
+            component,
+            &dioxus_path,
+            &dioxus_content,
+        )?);
+
+        let leptos_helpers = adapter_private_helpers(&leptos_content)?;
+        let dioxus_helpers = adapter_private_helpers(&dioxus_content)?;
+
+        for name in leptos_helpers
+            .keys()
+            .filter(|name| dioxus_helpers.contains_key(*name))
+        {
+            let leptos_helper = &leptos_helpers[name];
+            let dioxus_helper = &dioxus_helpers[name];
+
+            if leptos_helper.has_boundary_marker || dioxus_helper.has_boundary_marker {
+                continue;
+            }
+
+            failures.push(format!(
+                "{component}: duplicated adapter helper `{name}` appears in Leptos and Dioxus; \
+                 move renderer-independent logic to the agnostic/shared layer or mark it as \
+                 adapter rendering/framework glue with a reason"
+            ));
+        }
+    }
+
+    Ok(failures)
+}
+
+#[derive(Debug, Clone)]
+struct AdapterPrivateHelper {
+    has_boundary_marker: bool,
+}
+
+fn adapter_private_helpers(content: &str) -> Result<BTreeMap<String, AdapterPrivateHelper>, Error> {
+    let helper = Regex::new(
+        r"(?m)^(?P<indent>\s*)(?:(?:pub\([^)]*\)|async|const|unsafe)\s+)*fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(",
+    )?;
+    let mut helpers = BTreeMap::new();
+
+    for captures in helper.captures_iter(content) {
+        if captures
+            .name("indent")
+            .is_some_and(|indent| !indent.as_str().is_empty())
+        {
+            continue;
+        }
+
+        let name = captures["name"].to_owned();
+
+        if is_adapter_boundary_ignored_helper(&name) {
+            continue;
+        }
+
+        let start = captures
+            .get(0)
+            .expect("full match exists for helper")
+            .start();
+
+        let has_boundary_marker = previous_lines(content, start, 3)
+            .iter()
+            .any(|line| is_adapter_boundary_marker(line));
+
+        helpers.insert(
+            name,
+            AdapterPrivateHelper {
+                has_boundary_marker,
+            },
+        );
+    }
+
+    Ok(helpers)
+}
+
+fn adapter_api_extension_trait_failures(
+    component: &str,
+    path: &Path,
+    content: &str,
+) -> Result<Vec<String>, Error> {
+    let extension_trait = Regex::new(
+        r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?trait\s+[A-Za-z0-9_]*(?:Api|Props|State|Event)Ext\b",
+    )?;
+
+    let extension_impl = Regex::new(
+        r"(?m)^\s*impl(?:<[^>]+>)?\s+[A-Za-z0-9_]*(?:Api|Props|State|Event)Ext\s+for\s+(?:[A-Za-z0-9_:]+::)?(?:Api|Props|State|Event)\b",
+    )?;
+
+    let mut failures = Vec::new();
+
+    if extension_trait.is_match(content) || extension_impl.is_match(content) {
+        failures.push(format!(
+            "{component}: adapter-local extension trait over agnostic API in {}; \
+             add shared methods to the agnostic component API instead",
+            path.display()
+        ));
+    }
+
+    Ok(failures)
+}
+
+fn previous_lines(content: &str, offset: usize, count: usize) -> Vec<&str> {
+    content[..offset].lines().rev().take(count).collect()
+}
+
+fn is_adapter_boundary_marker(line: &str) -> bool {
+    [
+        "adapter-rendering-glue",
+        "adapter-framework-glue",
+        "adapter-context-glue",
+        "adapter-prop-glue",
+    ]
+    .iter()
+    .any(|marker| line.contains(marker))
+}
+
+fn is_adapter_boundary_ignored_helper(name: &str) -> bool {
+    [
+        "attr_",
+        "add_dynamic_",
+        "apply_",
+        "use_",
+        "build_",
+        "render_",
+        "view_",
+        "merge_",
+    ]
+    .iter()
+    .any(|prefix| name.starts_with(prefix))
+}
+
+fn is_adapter_test_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            (name.starts_with("test_") || !name.starts_with('_')) && name.ends_with(".rs")
+        })
+}
+
+fn adapter_test_path(dir: &Path, component: &str, wasm: bool) -> PathBuf {
+    let suffix = if wasm { "_wasm.rs" } else { ".rs" };
+    let preferred = dir.join(format!("{component}{suffix}"));
+
+    if preferred.exists() {
+        return preferred;
+    }
+
+    dir.join(format!("test_{component}{suffix}"))
+}
+
+fn read_optional(path: &Path) -> Result<Option<String>, Error> {
+    if path.exists() {
+        Ok(Some(fs::read_to_string(path)?))
+    } else {
+        Ok(None)
+    }
+}
+
+fn has_composition_test(content: &str) -> bool {
+    content.contains("Fieldset") && content.contains("Form") && content.contains("validation")
+}
+
+fn component_requires_wasm(src_dir: &Path, component: &str) -> Result<bool, Error> {
+    Ok(
+        read_component_source(src_dir, component)?.is_some_and(|content| {
+            [
+                "onclick",
+                "onkeydown",
+                "on_submit",
+                "on_reset",
+                "on_checked_change",
+                "use_machine",
+            ]
+            .iter()
+            .any(|needle| content.contains(needle))
+        }),
+    )
+}
+
+fn component_requires_composition(src_dir: &Path, component: &str) -> Result<bool, Error> {
+    Ok(
+        read_component_source(src_dir, component)?.is_some_and(|content| {
+            [
+                "field_support",
+                "use_fieldset",
+                "use_form",
+                "validation_errors",
+            ]
+            .iter()
+            .any(|needle| content.contains(needle))
+        }),
+    )
+}
+
+fn read_component_source(src_dir: &Path, component: &str) -> Result<Option<String>, Error> {
+    let path = component_module_path(src_dir, component);
+
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    if path.file_name().and_then(|name| name.to_str()) != Some("mod.rs") {
+        return read_optional(&path);
+    }
+
+    let Some(component_dir) = path.parent() else {
+        return read_optional(&path);
+    };
+
+    let mut content = String::new();
+
+    for path in rust_files_under(component_dir)? {
+        content.push_str(&fs::read_to_string(path)?);
+        content.push('\n');
+    }
+
+    Ok(Some(content))
+}
+
+fn rust_files_under(dir: &Path) -> Result<Vec<PathBuf>, Error> {
+    let mut files = Vec::new();
+    collect_rust_files(dir, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn collect_rust_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), Error> {
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+
+        if path.is_dir() {
+            collect_rust_files(&path, files)?;
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
+
+    Ok(())
+}
+
+fn component_module_path(src_dir: &Path, component: &str) -> PathBuf {
+    for category in component_category_dirs() {
+        let nested = src_dir.join(category).join(component).join("mod.rs");
+
+        if nested.exists() {
+            return nested;
+        }
+
+        let flat = src_dir.join(category).join(format!("{component}.rs"));
+
+        if flat.exists() {
+            return flat;
+        }
+    }
+
+    src_dir.join(format!("{component}.rs"))
+}
+
+fn implemented_adapter_components(
+    leptos_src: &Path,
+    dioxus_src: &Path,
+) -> Result<BTreeSet<String>, Error> {
+    let mut components = BTreeSet::new();
+
+    for src in [leptos_src, dioxus_src] {
+        if !src.exists() {
+            continue;
+        }
+
+        for category in component_category_dirs() {
+            let dir = src.join(category);
+
+            if !dir.exists() {
+                continue;
+            }
+
+            for entry in fs::read_dir(&dir)? {
+                let entry = entry?;
+                let path = entry.path();
+
+                if path.is_file() {
+                    if let Some(name) = path.file_stem().and_then(|stem| stem.to_str())
+                        && name != "mod"
+                    {
+                        components.insert(name.to_string());
+                    }
+                } else if path.join("mod.rs").exists()
+                    && let Some(name) = path.file_name().and_then(|name| name.to_str())
+                {
+                    components.insert(name.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(components)
+}
+
+fn manifest_component_categories(manifest: &manifest::Manifest) -> BTreeMap<String, String> {
+    manifest
+        .components
+        .iter()
+        .map(|(name, component)| (name.replace('-', "_"), component.category.replace('-', "_")))
+        .collect()
+}
+
+fn all_widget_category_files_exist(
+    options: &AdapterParityOptions,
+    component_categories: &BTreeMap<String, String>,
+    component: &str,
+) -> bool {
+    component_category_for(component_categories, component).is_some_and(|category| {
+        [
+            &options.leptos_widgets_dir,
+            &options.dioxus_widgets_dir,
+            &options.leptos_css_widgets_dir,
+            &options.dioxus_css_widgets_dir,
+            &options.leptos_tailwind_widgets_dir,
+            &options.dioxus_tailwind_widgets_dir,
+        ]
+        .iter()
+        .all(|dir| widget_category_file_contains_component(dir, &category, component))
+    })
+}
+
+fn widget_category_file_contains_component(dir: &Path, category: &str, component: &str) -> bool {
+    let path = dir.join("src/categories").join(format!("{category}.rs"));
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+
+    file_content_mentions_component(&content, component)
+}
+
+fn file_content_mentions_component(content: &str, component: &str) -> bool {
+    let kebab_component = component.replace('_', "-");
+    let pascal_component = component
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<String>();
+
+    content.contains(component)
+        || content.contains(&kebab_component)
+        || content.contains(&pascal_component)
+}
+
+fn e2e_fixture_exists(
+    dir: &Path,
+    component_categories: &BTreeMap<String, String>,
+    component: &str,
+) -> bool {
+    component_category_for(component_categories, component).is_some_and(|category| {
+        e2e_flat_fixture_contains_component(dir, &category, component)
+            || dir
+                .join("src/categories")
+                .join(&category)
+                .join(format!("{component}.rs"))
+                .exists()
+    })
+}
+
+fn e2e_flat_fixture_contains_component(dir: &Path, category: &str, component: &str) -> bool {
+    let path = dir.join("src/categories").join(format!("{category}.rs"));
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+
+    file_content_mentions_component(&content, component)
+}
+
+fn e2e_harness_exists(
+    dir: &Path,
+    component_categories: &BTreeMap<String, String>,
+    component: &str,
+) -> bool {
+    component_category_for(component_categories, component)
+        .is_some_and(|category| dir.join(category).join(format!("{component}.rs")).exists())
+}
+
+fn component_category_for(
+    component_categories: &BTreeMap<String, String>,
+    component: &str,
+) -> Option<String> {
+    component_categories.get(component).cloned()
+}
+
+const fn component_category_dirs() -> &'static [&'static str] {
+    &[
+        "input",
+        "selection",
+        "overlay",
+        "navigation",
+        "date_time",
+        "data_display",
+        "layout",
+        "specialized",
+        "utility",
+    ]
+}
+
+fn documented_adapter_components() -> Result<BTreeSet<String>, Error> {
+    let dir = Path::new("docs/implementation/adapter-components");
+
+    if !dir.exists() {
+        return Ok(BTreeSet::new());
+    }
+
+    let mut components = BTreeSet::new();
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if let Some(name) = path.file_name().and_then(|name| name.to_str())
+            && let Some(component) = name.strip_suffix("-usage.md")
+        {
+            components.insert(component.replace('-', "_"));
+        }
+    }
+
+    Ok(components)
+}
+
+fn counterpart_sketch_components(
+    known_components: &BTreeSet<String>,
+) -> Result<BTreeSet<String>, Error> {
+    let dir = Path::new("docs/implementation/sketches");
+
+    if !dir.exists() {
+        return Ok(BTreeSet::new());
+    }
+
+    let mut components = BTreeSet::new();
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_none_or(|name| !name.ends_with("-counterpart-sketch.md"))
+        {
+            continue;
+        }
+
+        let content = fs::read_to_string(path)?;
+
+        for line in content.lines() {
+            let Some(component) = line.trim().strip_prefix("- Component:") else {
+                continue;
+            };
+
+            let normalized = component.trim().to_lowercase().replace('-', "_");
+
+            if known_components.contains(&normalized) {
+                components.insert(normalized);
+            }
+        }
+    }
+
+    Ok(components)
 }
 
 fn extract_component_from_test_file(
@@ -1164,6 +1908,446 @@ mod tests {
     }
 
     #[test]
+    fn adapter_parity_counts_component_named_test_files() {
+        let root = temp_dir("adapter-component-names");
+
+        let leptos = root.join("leptos");
+        let dioxus = root.join("dioxus");
+
+        write(
+            &leptos.join("checkbox.rs"),
+            "#[test]\nfn ssr() {}\n#[test]\nfn composition() {}\n",
+        );
+        write(
+            &leptos.join("checkbox_wasm.rs"),
+            "#[wasm_bindgen_test(async)]\nasync fn browser() {}\n",
+        );
+        write(
+            &dioxus.join("checkbox.rs"),
+            "#[test]\nfn ssr() {}\n#[test]\nfn composition() {}\n",
+        );
+        write(
+            &dioxus.join("checkbox_wasm.rs"),
+            "#[wasm_bindgen_test]\nfn browser() {}\n",
+        );
+
+        let components = BTreeSet::from(["checkbox".to_owned()]);
+
+        let leptos_counts = adapter_test_counts(&leptos, &components).expect("leptos counts");
+        let dioxus_counts = adapter_test_counts(&dioxus, &components).expect("dioxus counts");
+
+        assert_eq!(leptos_counts["checkbox"], 3);
+        assert_eq!(dioxus_counts["checkbox"], 3);
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn adapter_presence_requires_composition_wasm_widgets_and_e2e_for_checkbox() {
+        let root = temp_dir("adapter-presence");
+
+        let options = AdapterParityOptions {
+            leptos_test_dir: root.join("crates/ars-leptos/tests"),
+            dioxus_test_dir: root.join("crates/ars-dioxus/tests"),
+            leptos_src_dir: root.join("crates/ars-leptos/src"),
+            dioxus_src_dir: root.join("crates/ars-dioxus/src"),
+            leptos_widgets_dir: root.join("examples/widgets-leptos"),
+            dioxus_widgets_dir: root.join("examples/widgets-dioxus"),
+            leptos_css_widgets_dir: root.join("examples/widgets-leptos-css"),
+            dioxus_css_widgets_dir: root.join("examples/widgets-dioxus-css"),
+            leptos_tailwind_widgets_dir: root.join("examples/widgets-leptos-tailwind"),
+            dioxus_tailwind_widgets_dir: root.join("examples/widgets-dioxus-tailwind"),
+            leptos_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/leptos"),
+            dioxus_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/dioxus"),
+            e2e_src_dir: root.join("crates/ars-e2e/src"),
+            tolerance: 2,
+        };
+
+        write(
+            &options.leptos_src_dir.join("input/checkbox.rs"),
+            "field_support on_checked_change",
+        );
+        write(
+            &options.dioxus_src_dir.join("input/checkbox.rs"),
+            "field_support on_checked_change",
+        );
+        write(
+            &options.leptos_test_dir.join("checkbox.rs"),
+            "#[test]\nfn one() {}\n",
+        );
+        write(
+            &options.dioxus_test_dir.join("checkbox.rs"),
+            "#[test]\nfn one() {}\n",
+        );
+
+        let components = BTreeSet::from(["checkbox".to_owned()]);
+        let documented = BTreeSet::new();
+        let component_categories = BTreeMap::from([("checkbox".to_owned(), "input".to_owned())]);
+        let presence =
+            adapter_component_presence(&options, &components, &documented, &component_categories)
+                .expect("presence");
+        let failures = presence["checkbox"].failures("checkbox");
+
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("usage documentation")),
+            "{failures:?}"
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("Leptos wasm test")),
+            "{failures:?}"
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("composition test")),
+            "{failures:?}"
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("all six widget examples")),
+            "{failures:?}"
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("E2E harness")),
+            "{failures:?}"
+        );
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn adapter_presence_requires_real_test_attributes() {
+        let root = temp_dir("adapter-presence-real-tests");
+
+        let options = AdapterParityOptions {
+            leptos_test_dir: root.join("crates/ars-leptos/tests"),
+            dioxus_test_dir: root.join("crates/ars-dioxus/tests"),
+            leptos_src_dir: root.join("crates/ars-leptos/src"),
+            dioxus_src_dir: root.join("crates/ars-dioxus/src"),
+            leptos_widgets_dir: root.join("examples/widgets-leptos"),
+            dioxus_widgets_dir: root.join("examples/widgets-dioxus"),
+            leptos_css_widgets_dir: root.join("examples/widgets-leptos-css"),
+            dioxus_css_widgets_dir: root.join("examples/widgets-dioxus-css"),
+            leptos_tailwind_widgets_dir: root.join("examples/widgets-leptos-tailwind"),
+            dioxus_tailwind_widgets_dir: root.join("examples/widgets-dioxus-tailwind"),
+            leptos_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/leptos"),
+            dioxus_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/dioxus"),
+            e2e_src_dir: root.join("crates/ars-e2e/src"),
+            tolerance: 2,
+        };
+
+        write(&options.leptos_src_dir.join("input/checkbox.rs"), "");
+        write(&options.dioxus_src_dir.join("input/checkbox.rs"), "");
+        write(
+            &options.leptos_test_dir.join("checkbox.rs"),
+            "// placeholder\n",
+        );
+        write(
+            &options.dioxus_test_dir.join("checkbox.rs"),
+            "// placeholder\n",
+        );
+        write(
+            &options.leptos_test_dir.join("checkbox_wasm.rs"),
+            "// placeholder\n",
+        );
+        write(
+            &options.dioxus_test_dir.join("checkbox_wasm.rs"),
+            "// placeholder\n",
+        );
+
+        let components = BTreeSet::from(["checkbox".to_owned()]);
+        let documented = BTreeSet::from(["checkbox".to_owned()]);
+        let component_categories = BTreeMap::from([("checkbox".to_owned(), "input".to_owned())]);
+        let presence =
+            adapter_component_presence(&options, &components, &documented, &component_categories)
+                .expect("presence");
+        let failures = presence["checkbox"].failures("checkbox");
+
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("Leptos SSR/unit test")),
+            "{failures:?}"
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("Dioxus SSR/unit test")),
+            "{failures:?}"
+        );
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn widget_category_file_must_mention_component() {
+        let root = temp_dir("widget-category-component");
+        let widgets = root.join("examples/widgets-leptos");
+
+        write(
+            &widgets.join("src/categories/input.rs"),
+            "pub fn input_panel() { Checkbox {} }\n",
+        );
+
+        assert!(widget_category_file_contains_component(
+            &widgets, "input", "checkbox"
+        ));
+        assert!(!widget_category_file_contains_component(
+            &widgets,
+            "input",
+            "text_field"
+        ));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn e2e_fixture_uses_manifest_derived_category() {
+        let root = temp_dir("e2e-manifest-category");
+        let fixtures = root.join("crates/ars-e2e/fixtures/leptos");
+        let component_categories = BTreeMap::from([("text_field".to_owned(), "input".to_owned())]);
+
+        write(
+            &fixtures.join("src/categories/input.rs"),
+            "pub fn input_panel() { TextField {} }\n",
+        );
+
+        assert!(e2e_fixture_exists(
+            &fixtures,
+            &component_categories,
+            "text_field"
+        ));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn component_source_scan_includes_directory_child_modules() {
+        let root = temp_dir("component-source-dir");
+        let src = root.join("crates/ars-dioxus/src");
+
+        write(&src.join("input/checkbox/mod.rs"), "mod control;\n");
+        write(
+            &src.join("input/checkbox/control.rs"),
+            "on_checked_change\n",
+        );
+
+        assert!(
+            component_requires_wasm(&src, "checkbox").expect("scan component source"),
+            "child module event handlers must require wasm coverage"
+        );
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn adapter_semantic_boundary_flags_qualified_private_helpers() {
+        let root = temp_dir("adapter-semantic-qualified");
+
+        let options = AdapterParityOptions {
+            leptos_test_dir: root.join("crates/ars-leptos/tests"),
+            dioxus_test_dir: root.join("crates/ars-dioxus/tests"),
+            leptos_src_dir: root.join("crates/ars-leptos/src"),
+            dioxus_src_dir: root.join("crates/ars-dioxus/src"),
+            leptos_widgets_dir: root.join("examples/widgets-leptos"),
+            dioxus_widgets_dir: root.join("examples/widgets-dioxus"),
+            leptos_css_widgets_dir: root.join("examples/widgets-leptos-css"),
+            dioxus_css_widgets_dir: root.join("examples/widgets-dioxus-css"),
+            leptos_tailwind_widgets_dir: root.join("examples/widgets-leptos-tailwind"),
+            dioxus_tailwind_widgets_dir: root.join("examples/widgets-dioxus-tailwind"),
+            leptos_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/leptos"),
+            dioxus_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/dioxus"),
+            e2e_src_dir: root.join("crates/ars-e2e/src"),
+            tolerance: 2,
+        };
+
+        write(
+            &options.leptos_src_dir.join("input/checkbox.rs"),
+            "pub(crate) const fn requested_toggle_state() -> bool { true }\n",
+        );
+        write(
+            &options.dioxus_src_dir.join("input/checkbox.rs"),
+            "async fn requested_toggle_state() -> bool { true }\n",
+        );
+
+        let components = BTreeSet::from(["checkbox".to_owned()]);
+        let failures =
+            adapter_semantic_boundary_failures(&options, &components).expect("semantic failures");
+
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("duplicated adapter helper")),
+            "{failures:?}"
+        );
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn e2e_flat_fixture_must_mention_component() {
+        let root = temp_dir("e2e-flat-fixture-component");
+        let fixtures = root.join("crates/ars-e2e/fixtures/leptos");
+
+        write(
+            &fixtures.join("src/categories/input.rs"),
+            "pub fn input_panel() { TextField {} }\n",
+        );
+
+        let component_categories = BTreeMap::from([("checkbox".to_owned(), "input".to_owned())]);
+
+        assert!(!e2e_fixture_exists(
+            &fixtures,
+            &component_categories,
+            "checkbox"
+        ));
+
+        write(
+            &fixtures.join("src/categories/input.rs"),
+            "pub fn input_panel() { Checkbox {} }\n",
+        );
+
+        assert!(e2e_fixture_exists(
+            &fixtures,
+            &component_categories,
+            "checkbox"
+        ));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn adapter_semantic_boundary_flags_duplicated_private_helpers() {
+        let root = temp_dir("adapter-semantic-duplicated");
+
+        let options = AdapterParityOptions {
+            leptos_test_dir: root.join("crates/ars-leptos/tests"),
+            dioxus_test_dir: root.join("crates/ars-dioxus/tests"),
+            leptos_src_dir: root.join("crates/ars-leptos/src"),
+            dioxus_src_dir: root.join("crates/ars-dioxus/src"),
+            leptos_widgets_dir: root.join("examples/widgets-leptos"),
+            dioxus_widgets_dir: root.join("examples/widgets-dioxus"),
+            leptos_css_widgets_dir: root.join("examples/widgets-leptos-css"),
+            dioxus_css_widgets_dir: root.join("examples/widgets-dioxus-css"),
+            leptos_tailwind_widgets_dir: root.join("examples/widgets-leptos-tailwind"),
+            dioxus_tailwind_widgets_dir: root.join("examples/widgets-dioxus-tailwind"),
+            leptos_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/leptos"),
+            dioxus_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/dioxus"),
+            e2e_src_dir: root.join("crates/ars-e2e/src"),
+            tolerance: 2,
+        };
+
+        write(
+            &options.leptos_src_dir.join("input/checkbox.rs"),
+            "fn requested_toggle_state() -> State { State::Checked }\n",
+        );
+        write(
+            &options.dioxus_src_dir.join("input/checkbox.rs"),
+            "fn requested_toggle_state() -> State { State::Checked }\n",
+        );
+
+        let components = BTreeSet::from(["checkbox".to_owned()]);
+        let failures =
+            adapter_semantic_boundary_failures(&options, &components).expect("semantic failures");
+
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("duplicated adapter helper")),
+            "{failures:?}"
+        );
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn adapter_semantic_boundary_allows_marked_renderer_glue() {
+        let root = temp_dir("adapter-semantic-marked");
+
+        let options = AdapterParityOptions {
+            leptos_test_dir: root.join("crates/ars-leptos/tests"),
+            dioxus_test_dir: root.join("crates/ars-dioxus/tests"),
+            leptos_src_dir: root.join("crates/ars-leptos/src"),
+            dioxus_src_dir: root.join("crates/ars-dioxus/src"),
+            leptos_widgets_dir: root.join("examples/widgets-leptos"),
+            dioxus_widgets_dir: root.join("examples/widgets-dioxus"),
+            leptos_css_widgets_dir: root.join("examples/widgets-leptos-css"),
+            dioxus_css_widgets_dir: root.join("examples/widgets-dioxus-css"),
+            leptos_tailwind_widgets_dir: root.join("examples/widgets-leptos-tailwind"),
+            dioxus_tailwind_widgets_dir: root.join("examples/widgets-dioxus-tailwind"),
+            leptos_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/leptos"),
+            dioxus_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/dioxus"),
+            e2e_src_dir: root.join("crates/ars-e2e/src"),
+            tolerance: 2,
+        };
+
+        write(
+            &options.leptos_src_dir.join("input/checkbox.rs"),
+            "// adapter-rendering-glue: needs framework event conversion\nfn event_value() -> bool { true }\n",
+        );
+        write(
+            &options.dioxus_src_dir.join("input/checkbox.rs"),
+            "fn event_value() -> bool { true }\n",
+        );
+
+        let components = BTreeSet::from(["checkbox".to_owned()]);
+        let failures =
+            adapter_semantic_boundary_failures(&options, &components).expect("semantic failures");
+
+        assert!(failures.is_empty(), "{failures:?}");
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn adapter_semantic_boundary_flags_api_extension_traits() {
+        let root = temp_dir("adapter-semantic-ext");
+
+        let options = AdapterParityOptions {
+            leptos_test_dir: root.join("crates/ars-leptos/tests"),
+            dioxus_test_dir: root.join("crates/ars-dioxus/tests"),
+            leptos_src_dir: root.join("crates/ars-leptos/src"),
+            dioxus_src_dir: root.join("crates/ars-dioxus/src"),
+            leptos_widgets_dir: root.join("examples/widgets-leptos"),
+            dioxus_widgets_dir: root.join("examples/widgets-dioxus"),
+            leptos_css_widgets_dir: root.join("examples/widgets-leptos-css"),
+            dioxus_css_widgets_dir: root.join("examples/widgets-dioxus-css"),
+            leptos_tailwind_widgets_dir: root.join("examples/widgets-leptos-tailwind"),
+            dioxus_tailwind_widgets_dir: root.join("examples/widgets-dioxus-tailwind"),
+            leptos_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/leptos"),
+            dioxus_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/dioxus"),
+            e2e_src_dir: root.join("crates/ars-e2e/src"),
+            tolerance: 2,
+        };
+
+        write(
+            &options.leptos_src_dir.join("input/checkbox.rs"),
+            "trait CheckboxApiExt {}\nimpl CheckboxApiExt for Api<'_> {}\n",
+        );
+        write(&options.dioxus_src_dir.join("input/checkbox.rs"), "");
+
+        let components = BTreeSet::from(["checkbox".to_owned()]);
+        let failures =
+            adapter_semantic_boundary_failures(&options, &components).expect("semantic failures");
+
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("extension trait")),
+            "{failures:?}"
+        );
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
     fn adapter_parity_counts_async_wasm_bindgen_tests() {
         // Regression: `#[wasm_bindgen_test(async)]` (Leptos wasm test
         // harness style) must be counted just like the bare
@@ -1238,8 +2422,13 @@ mod tests {
         let leptos_counts = BTreeMap::from([("dialog".to_owned(), 1)]);
         let dioxus_counts = BTreeMap::new();
 
-        let (_output, failures) =
-            adapter_parity_report(&components, &leptos_counts, &dioxus_counts, 2);
+        let (_output, failures) = adapter_parity_report(
+            &components,
+            &leptos_counts,
+            &dioxus_counts,
+            2,
+            &BTreeMap::new(),
+        );
 
         assert_eq!(failures.len(), 1);
         assert!(failures[0].contains("both adapters must have tests"));
@@ -1249,8 +2438,13 @@ mod tests {
     fn adapter_parity_reports_manifest_components_with_no_tests_as_skipped() {
         let components = BTreeSet::from(["button".to_owned()]);
 
-        let (output, failures) =
-            adapter_parity_report(&components, &BTreeMap::new(), &BTreeMap::new(), 2);
+        let (output, failures) = adapter_parity_report(
+            &components,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            2,
+            &BTreeMap::new(),
+        );
 
         assert!(failures.is_empty());
         assert!(output.contains("button | 0 | 0 | 0 | SKIP"));

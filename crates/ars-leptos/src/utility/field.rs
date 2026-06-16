@@ -83,8 +83,6 @@ where
             invalid,
             errors,
             name,
-            form_context: use_context::<super::form::FormContext>(),
-            fieldset_context: use_context::<super::fieldset::InheritedFieldsetContext>(),
         },
     ));
 
@@ -104,36 +102,6 @@ where
     }
 }
 
-fn merged_validation_errors(
-    mut messages: Vec<Error>,
-    name: Option<&str>,
-    form_context: Option<super::form::FormContext>,
-) -> Vec<Error> {
-    if let Some(name) = name
-        && let Some(form_context) = form_context
-    {
-        let _ = form_context.machine.context_version.get();
-
-        if let Some(form_errors) = form_context
-            .machine
-            .service
-            .read_value()
-            .context()
-            .validation_errors
-            .get(name)
-            && !form_errors.is_empty()
-        {
-            messages.reserve(form_errors.len());
-
-            for error in form_errors {
-                messages.push(error.clone());
-            }
-        }
-    }
-
-    messages
-}
-
 struct FieldReactiveProps {
     required: Signal<bool>,
     disabled: Signal<bool>,
@@ -141,8 +109,6 @@ struct FieldReactiveProps {
     invalid: Signal<bool>,
     errors: Signal<Vec<Error>>,
     name: Option<Oco<'static, str>>,
-    form_context: Option<super::form::FormContext>,
-    fieldset_context: Option<super::fieldset::InheritedFieldsetContext>,
 }
 
 fn field_props_signal(
@@ -154,26 +120,19 @@ fn field_props_signal(
         invalid,
         errors,
         name,
-        form_context,
-        fieldset_context,
     }: FieldReactiveProps,
 ) -> Signal<Props> {
-    Signal::derive(move || {
-        let inherited_disabled = fieldset_context.is_some_and(|ctx| ctx.disabled.get());
-        let inherited_readonly = fieldset_context.is_some_and(|ctx| ctx.readonly.get());
-        let inherited_invalid = fieldset_context.is_some_and(|ctx| ctx.invalid.get());
+    let support =
+        super::field_support::use_field_support(disabled, invalid, readonly, errors, name);
 
+    Signal::derive(move || {
         props
             .clone()
             .required(required.get())
-            .disabled(disabled.get() || inherited_disabled)
-            .readonly(readonly.get() || inherited_readonly)
-            .invalid(invalid.get() || inherited_invalid)
-            .errors(merged_validation_errors(
-                errors.get(),
-                name.as_deref(),
-                form_context,
-            ))
+            .disabled(support.disabled.get())
+            .readonly(support.readonly.get())
+            .invalid(support.invalid.get())
+            .errors(support.errors.get())
     })
 }
 
@@ -302,13 +261,27 @@ where
     view! { <div {..attrs}>{children.into_inner()()}</div> }
 }
 
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "Api method references are not general enough for part attr callbacks."
+)]
 fn add_dynamic_input_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<field::Machine>) {
-    let described_by = input_attr_string_memo(machine, HtmlAttr::Aria(AriaAttr::DescribedBy));
-    let aria_invalid = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Invalid));
-    let error_message = input_attr_string_memo(machine, HtmlAttr::Aria(AriaAttr::ErrorMessage));
-    let aria_required = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Required));
-    let aria_disabled = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Disabled));
-    let aria_readonly = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::ReadOnly));
+    let described_by = machine.attr_optional_string_memo(
+        |api| api.input_attrs(),
+        HtmlAttr::Aria(AriaAttr::DescribedBy),
+    );
+    let aria_invalid =
+        machine.attr_presence_memo(|api| api.input_attrs(), HtmlAttr::Aria(AriaAttr::Invalid));
+    let error_message = machine.attr_optional_string_memo(
+        |api| api.input_attrs(),
+        HtmlAttr::Aria(AriaAttr::ErrorMessage),
+    );
+    let aria_required =
+        machine.attr_presence_memo(|api| api.input_attrs(), HtmlAttr::Aria(AriaAttr::Required));
+    let aria_disabled =
+        machine.attr_presence_memo(|api| api.input_attrs(), HtmlAttr::Aria(AriaAttr::Disabled));
+    let aria_readonly =
+        machine.attr_presence_memo(|api| api.input_attrs(), HtmlAttr::Aria(AriaAttr::ReadOnly));
 
     attrs
         .set(
@@ -356,20 +329,6 @@ fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<
         HtmlAttr::Data("ars-invalid"),
         AttrValue::reactive_bool(move || invalid.get()),
     );
-}
-
-fn input_attr_string_memo(
-    machine: crate::UseMachineReturn<field::Machine>,
-    attr: HtmlAttr,
-) -> Memo<Option<String>> {
-    machine.derive(move |api| api.input_attrs().get(&attr).map(str::to_owned))
-}
-
-fn input_attr_bool_memo(
-    machine: crate::UseMachineReturn<field::Machine>,
-    attr: HtmlAttr,
-) -> Memo<bool> {
-    machine.derive(move |api| api.input_attrs().contains(&attr))
 }
 
 fn apply_input_attrs(

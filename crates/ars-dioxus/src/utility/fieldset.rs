@@ -6,9 +6,7 @@ use ars_core::{Direction, HtmlAttr};
 use ars_forms::validation::Error;
 use dioxus::prelude::*;
 
-use crate::{
-    as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs, use_machine, use_stable_id,
-};
+use crate::{attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs, use_machine, use_stable_id};
 
 #[derive(Clone, Copy)]
 struct FieldsetContext {

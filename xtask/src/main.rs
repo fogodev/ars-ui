@@ -3,7 +3,7 @@
 use std::{env, path::PathBuf, process, sync};
 
 use clap::{Parser, Subcommand};
-use xtask::{ci, coverage, crap, e2e, examples, lint, manifest, mcp, mutants, spec, test};
+use xtask::{adapter, ci, coverage, crap, e2e, examples, lint, manifest, mcp, mutants, spec, test};
 
 /// ars-ui workspace task runner.
 #[derive(Parser)]
@@ -93,6 +93,12 @@ enum Command {
     Spec {
         #[command(subcommand)]
         cmd: SpecCommand,
+    },
+
+    /// Adapter component development helpers.
+    Adapter {
+        #[command(subcommand)]
+        cmd: AdapterCommand,
     },
 
     /// Code coverage threshold enforcement.
@@ -260,6 +266,31 @@ enum CoverageCommand {
 }
 
 #[derive(Subcommand)]
+enum AdapterCommand {
+    /// Scaffold adapter component files and required test placeholders.
+    Scaffold {
+        /// Component name in kebab or snake case.
+        component: String,
+
+        /// Component category, such as "input" or "utility".
+        #[arg(long)]
+        category: String,
+
+        /// Include only the Leptos adapter.
+        #[arg(long, conflicts_with = "dioxus_only")]
+        leptos_only: bool,
+
+        /// Include only the Dioxus adapter.
+        #[arg(long, conflicts_with = "leptos_only")]
+        dioxus_only: bool,
+
+        /// Include Form/Fieldset composition test placeholders.
+        #[arg(long)]
+        form_control: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum LintCommand {
     /// Compare per-component adapter test counts.
     AdapterParity {
@@ -270,6 +301,14 @@ enum LintCommand {
         /// Directory containing Dioxus adapter tests.
         #[arg(long, default_value = "crates/ars-dioxus/tests")]
         dioxus_test_dir: PathBuf,
+
+        /// Directory containing Leptos adapter source modules.
+        #[arg(long, default_value = "crates/ars-leptos/src")]
+        leptos_src_dir: PathBuf,
+
+        /// Directory containing Dioxus adapter source modules.
+        #[arg(long, default_value = "crates/ars-dioxus/src")]
+        dioxus_src_dir: PathBuf,
 
         /// Maximum allowed per-component count delta.
         #[arg(long, default_value_t = 2)]
@@ -351,6 +390,30 @@ enum ExamplesCommand {
 
 #[derive(Subcommand)]
 enum E2eCommand {
+    /// Run all input component E2E harnesses against a widget example.
+    Input {
+        /// Adapter example to exercise.
+        #[arg(long, value_enum, default_value_t = e2e::Adapter::Leptos)]
+        adapter: e2e::Adapter,
+
+        /// Port for the example server.
+        #[arg(long)]
+        port: Option<u16>,
+
+        /// `WebDriver` endpoint. Defaults to `WEBDRIVER_URL` or local `ChromeDriver`
+        /// on port 9515.
+        #[arg(long)]
+        webdriver_url: Option<String>,
+
+        /// Use an already-running example server instead of spawning one.
+        #[arg(long)]
+        no_server: bool,
+
+        /// Run Chrome with a visible browser window.
+        #[arg(long)]
+        headed: bool,
+    },
+
     /// Run all navigation component E2E harnesses against a widget example.
     Navigation {
         /// Adapter example to exercise.
@@ -404,6 +467,30 @@ enum E2eCommand {
         /// Dioxus desktop example to exercise.
         #[arg(long, value_enum, default_value_t = e2e::DesktopExample::DioxusTailwind)]
         example: e2e::DesktopExample,
+    },
+
+    /// Run browser smoke checks against public widgets examples.
+    Widgets {
+        /// Public widgets example to exercise.
+        #[arg(long, value_enum, default_value_t = e2e::WidgetsExample::LeptosTailwind)]
+        example: e2e::WidgetsExample,
+
+        /// Port for the example server.
+        #[arg(long)]
+        port: Option<u16>,
+
+        /// `WebDriver` endpoint. Defaults to `WEBDRIVER_URL` or local `ChromeDriver`
+        /// on port 9515.
+        #[arg(long)]
+        webdriver_url: Option<String>,
+
+        /// Use an already-running example server instead of spawning one.
+        #[arg(long)]
+        no_server: bool,
+
+        /// Run Chrome with a visible browser window.
+        #[arg(long)]
+        headed: bool,
     },
 }
 
@@ -526,6 +613,12 @@ enum SpecCommand {
 
     /// Validate frontmatter against manifest.
     Validate,
+
+    /// Validate a component adapter implementation sketch.
+    ValidateSketch {
+        /// Path to the sketch markdown file.
+        file: PathBuf,
+    },
 
     /// Lint Rust code blocks under §1.1 / §1.2 of every component spec
     /// for missing `///` doc comments and missing `Debug`/`Clone` derives
@@ -705,11 +798,16 @@ fn main() {
                 LintCommand::AdapterParity {
                     leptos_test_dir,
                     dioxus_test_dir,
+                    leptos_src_dir,
+                    dioxus_src_dir,
                     tolerance,
                 } => lint::check_adapter_parity(&lint::AdapterParityOptions {
                     leptos_test_dir,
                     dioxus_test_dir,
+                    leptos_src_dir,
+                    dioxus_src_dir,
                     tolerance,
+                    ..lint::AdapterParityOptions::workspace_defaults()
                 }),
 
                 LintCommand::SnapshotCount {
@@ -776,6 +874,20 @@ fn main() {
         // ── E2E ───────────────────────────────────────────────────────
         Command::E2e { cmd } => {
             let result = match cmd {
+                E2eCommand::Input {
+                    adapter,
+                    port,
+                    webdriver_url,
+                    no_server,
+                    headed,
+                } => e2e::run_input(&e2e::Options {
+                    adapter,
+                    port,
+                    webdriver_url,
+                    no_server,
+                    headless: !headed,
+                }),
+
                 E2eCommand::Navigation {
                     adapter,
                     port,
@@ -805,6 +917,23 @@ fn main() {
                 }),
 
                 E2eCommand::Desktop { example } => e2e::run_desktop(example),
+
+                E2eCommand::Widgets {
+                    example,
+                    port,
+                    webdriver_url,
+                    no_server,
+                    headed,
+                } => e2e::run_widgets(
+                    example,
+                    &e2e::Options {
+                        adapter: e2e::Adapter::Leptos,
+                        port,
+                        webdriver_url,
+                        no_server,
+                        headless: !headed,
+                    },
+                ),
             };
 
             if let Err(e) = result {
@@ -954,6 +1083,20 @@ fn main() {
                     report
                 }
 
+                SpecCommand::ValidateSketch { file } => {
+                    let report = spec::sketch::execute(&file);
+
+                    if let Ok(text) = &report
+                        && text.contains("sketch error(s) found:")
+                    {
+                        print!("{text}");
+
+                        process::exit(1);
+                    }
+
+                    report
+                }
+
                 SpecCommand::LintCode => {
                     let report = spec::lint_code::execute(&root);
 
@@ -1010,6 +1153,36 @@ fn main() {
 
             match result {
                 Ok(output) => print!("{output}"),
+                Err(e) => {
+                    eprintln!("error: {e}");
+
+                    process::exit(1);
+                }
+            }
+        }
+
+        // ── Adapter helpers ──────────────────────────────────────────
+        Command::Adapter { cmd } => {
+            let result = match cmd {
+                AdapterCommand::Scaffold {
+                    component,
+                    category,
+                    leptos_only,
+                    dioxus_only,
+                    form_control,
+                } => adapter::scaffold(&adapter::ScaffoldOptions {
+                    component,
+                    category,
+                    leptos: !dioxus_only,
+                    dioxus: !leptos_only,
+                    form_control,
+                    root: env::current_dir().expect("cannot read current directory"),
+                }),
+            };
+
+            match result {
+                Ok(output) => print!("{output}"),
+
                 Err(e) => {
                     eprintln!("error: {e}");
 

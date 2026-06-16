@@ -41,6 +41,7 @@ fn arb_checkbox_props() -> impl Strategy<Value = checkbox::Props> {
                     disabled,
                     required,
                     invalid,
+                    errors: Vec::new(),
                     readonly,
                     name,
                     form,
@@ -60,6 +61,7 @@ fn arb_checkbox_event() -> impl Strategy<Value = checkbox::Event> {
         prop::option::of(arb_checkbox_state()).prop_map(checkbox::Event::SetValue),
         Just(checkbox::Event::SetProps),
         any::<bool>().prop_map(checkbox::Event::SetHasDescription),
+        any::<bool>().prop_map(checkbox::Event::SetHasErrorMessage),
         any::<bool>().prop_map(|is_keyboard| checkbox::Event::Focus { is_keyboard }),
         Just(checkbox::Event::Blur),
     ]

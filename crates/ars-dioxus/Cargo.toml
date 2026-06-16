@@ -10,7 +10,7 @@ rust-version.workspace = true
 [features]
 default = ["icu4x"]
 debug = ["dep:log", "ars-core/debug", "ars-interactions/debug", "ars-dom?/debug"]
-desktop = ["dioxus/desktop", "dep:arboard", "dep:uuid", "dep:rfd", "dep:log"]
+desktop = ["dioxus/desktop", "dioxus/document", "dep:arboard", "dep:uuid", "dep:rfd", "dep:log"]
 desktop-dom = ["desktop", "dep:ars-dom"]
 mobile = ["dioxus/mobile"]
 ssr = [
@@ -87,6 +87,7 @@ features = [
   "HtmlCollection",
   "HtmlElement",
   "HtmlFormElement",
+  "HtmlInputElement",
   "KeyboardEvent",
   "KeyboardEventInit",
   "MouseEvent",

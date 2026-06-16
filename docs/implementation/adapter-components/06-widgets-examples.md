@@ -54,6 +54,23 @@ Widgets examples must showcase the public ars-ui components. They are not a
 place to build a second component implementation because the adapter API is
 missing a convenient surface.
 
+Import examples through the adapter prelude as much as possible:
+
+```rust
+use ars_leptos::prelude::*;
+```
+
+or:
+
+```rust
+use ars_dioxus::prelude::*;
+```
+
+Do not import directly from `leptos`, `dioxus`, or deep adapter modules when the
+item is available from the adapter prelude. CSS and Tailwind widget crates may
+also import the checked-in styled component template they intentionally
+demonstrate from `ars-leptos-components` or `ars-dioxus-components`.
+
 Allowed example logic:
 
 - choosing sample data and initial prop values;

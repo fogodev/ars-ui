@@ -10,17 +10,19 @@ source_foundation: foundation/09-adapter-dioxus.md
 
 ## 1. Purpose and Adapter Scope
 
-This spec maps the core [`Checkbox`](../../components/input/checkbox.md) contract onto a Dioxus 0.7.x component. The adapter must preserve tri-state semantics, hidden-input form participation, and the built-in description and error-message parts.
+This spec maps the core [`Checkbox`](../../components/input/checkbox.md) contract onto Dioxus 0.7.x unstyled primitive parts. The adapter must preserve tri-state semantics, hidden-input form participation, and the built-in description and error-message parts. Ready-made styled Checkbox source templates live in `ars-dioxus-components`; the future `ars-ui` binary will copy those templates into user applications for source-owned customization.
 
 ## 2. Public Adapter API
 
 ```rust,no_check
 #[derive(Props, Clone, PartialEq)]
-pub struct CheckboxProps {
+pub struct RootProps {
+    #[props(optional, into)]
+    pub id: Option<String>,
     #[props(optional)]
     pub checked: Option<checkbox::State>,
-    #[props(optional)]
-    pub default_checked: Option<checkbox::State>,
+    #[props(default = checkbox::State::Unchecked)]
+    pub default_checked: checkbox::State,
     #[props(default = false)]
     pub disabled: bool,
     #[props(default = false)]
@@ -29,26 +31,63 @@ pub struct CheckboxProps {
     pub required: bool,
     #[props(default = false)]
     pub invalid: bool,
+    #[props(default)]
+    pub errors: Vec<ars_forms::validation::Error>,
     #[props(optional)]
     pub name: Option<String>,
     #[props(optional)]
     pub value: Option<String>,
     #[props(optional)]
     pub form: Option<String>,
+    #[props(default = false)]
+    pub has_description: bool,
+    #[props(default = false)]
+    pub has_error_message: bool,
+    #[props(optional, into)]
+    pub on_checked_change: Option<EventHandler<checkbox::State>>,
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
     pub children: Element,
 }
 
 #[component]
-pub fn Checkbox(props: CheckboxProps) -> Element
+pub fn Root(props: RootProps) -> Element
+
+#[component]
+pub fn Label(props: LabelProps) -> Element
+
+#[component]
+pub fn Control(props: ControlProps) -> Element
+
+#[component]
+pub fn Indicator(props: IndicatorProps) -> Element
+
+#[component]
+pub fn HiddenInput(props: HiddenInputProps) -> Element
+
+#[component]
+pub fn Description(props: DescriptionProps) -> Element
+
+#[component]
+pub fn ErrorMessage(props: ErrorMessageProps) -> Element
 ```
 
-The adapter also forwards the shared input props from the core contract, including IDs, locale or messages, and field integration data. Plain props are preferred; wrappers may layer post-mount synchronization when needed.
+The adapter forwards the shared input props from the core contract through `Root`, including IDs, field integration data, validation errors, and structural description/error presence. Plain props are preferred; wrappers may layer post-mount synchronization when needed.
+
+The adapter does not expose a closed-anatomy styled `Checkbox` component.
+Widgets and reference examples that want a ready-made visual component use
+`ars_dioxus_components::input::checkbox::{css, tailwind}::Checkbox`. Applications that
+need custom anatomy compose these primitives directly today, and should edit
+copied source once the future `ars-ui` binary installs the styled template into
+their project. Each Dioxus compound part uses `GlobalAttributes` so consumers
+can style the part with normal `class`, `style`, `data-*`, and similar
+attributes without adding root-level `*_class` / `*_style` prop families.
 
 ## 3. Mapping to Core Component Contract
 
 - Props parity: the adapter exposes the full core `Props` surface, including tri-state checked values and form-related props.
-- Event parity: `Toggle`, `Focus`, `Blur`, `SetChecked`, `SetDisabled`, `SetReadonly`, `SetInvalid`, and `SetRequired` remain machine-owned.
-- Core machine ownership: `use_machine::<checkbox::Machine>(...)` remains the single source of truth for ARIA state, hidden-input state, and label wiring.
+- Event parity: `Toggle`, `Focus`, `Blur`, `Check`, `Uncheck`, `Reset`, `SetValue`, `SetProps`, `SetHasDescription`, and `SetHasErrorMessage` remain machine-owned.
+- Core machine ownership: `use_machine_with_reactive_props::<checkbox::Machine>(...)` remains the single source of truth for ARIA state, hidden-input state, and label wiring.
 
 ## 4. Part Mapping
 
@@ -65,21 +104,26 @@ The adapter also forwards the shared input props from the core contract, includi
 ## 5. Attr Merge and Ownership Rules
 
 - Core ARIA, state, `tabindex`, `id`, `name`, `value`, and form attrs on `Control` or `HiddenInput` always win over consumer decoration.
-- `class` and `style` merge additively on `Root`, `Label`, and `Control`; consumer handlers compose after adapter handlers unless the adapter must prevent an invalid toggle.
+- Global attributes, including `class`, `style`, `data-*`, `lang`, and extra `aria-*`, are forwarded onto `Root`. Consumer handlers compose after adapter handlers unless the adapter must prevent an invalid toggle.
+- Inner part styling should use public compound parts when the consumer needs direct classes/styles on parts. Tailwind consumers may also use arbitrary variants over stable component attrs such as `data-ars-part`, `data-ars-state`, `data-ars-disabled`, `data-ars-readonly`, and `data-ars-invalid`.
+- Do not add repeated root-level `control_class`, `indicator_style`, or similar props. Expose or extend a public compound part instead.
 - Consumers must not remove `aria-hidden` from `Indicator` or `HiddenInput`, and must not repurpose `HiddenInput` as a visible control.
 
 ## 6. Composition / Context Contract
 
-`Checkbox` is standalone, but it may optionally consume field or fieldset context for disabled, readonly, described-by, and validation wiring. Group behavior is owned by [`CheckboxGroup`](checkbox-group.md) rather than by implicit child inspection inside `Checkbox`.
+`Root` is standalone, but it consumes the shared adapter field-support helper when rendered under `Form` or `Fieldset`. Explicit props, named form validation errors, and inherited disabled, readonly, and invalid state are merged before constructing core `Props`. Group behavior is owned by [`CheckboxGroup`](checkbox-group.md) rather than by implicit child inspection inside `Root`.
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop           | Mode       | Sync trigger | Machine event / update path  | Visible effect                                      |
-| ---------------------- | ---------- | ------------ | ---------------------------- | --------------------------------------------------- |
-| `checked`              | controlled | prop change  | `SetChecked`                 | updates `aria-checked`, indicator, and hidden input |
-| `disabled`             | controlled | prop change  | `SetDisabled`                | blocks interaction and updates disabled attrs       |
-| `readonly`             | controlled | prop change  | `SetReadonly`                | preserves focusability but blocks mutation          |
-| `required` / `invalid` | controlled | prop change  | `SetRequired` / `SetInvalid` | updates ARIA and described-by wiring                |
+| Adapter prop           | Mode       | Sync trigger | Machine event / update path | Visible effect                                      |
+| ---------------------- | ---------- | ------------ | --------------------------- | --------------------------------------------------- |
+| `checked`              | controlled | prop change  | `SetValue(Some(state))`     | updates `aria-checked`, indicator, and hidden input |
+| `disabled`             | controlled | prop change  | `SetProps`                  | blocks interaction and updates disabled attrs       |
+| `readonly`             | controlled | prop change  | `SetProps`                  | preserves focusability but blocks mutation          |
+| `required` / `invalid` | controlled | prop change  | `SetProps`                  | updates ARIA and described-by wiring                |
+| `errors`               | controlled | prop change  | `SetProps`                  | updates invalid state from validation errors        |
+| `has_description`      | structural | prop/render  | `SetHasDescription`         | updates `aria-describedby` before error message     |
+| `has_error_message`    | structural | prop/render  | `SetHasErrorMessage`        | gates `aria-errormessage` and error described-by    |
 
 User activation maps pointer or keyboard activation on `Control` to `Toggle`. The adapter should expose `on_checked_change`-style callbacks only after the machine accepts the transition.
 
@@ -105,7 +149,7 @@ User activation maps pointer or keyboard activation on `Control` to `Toggle`. Th
 
 - Checked-change callbacks emit the committed `checkbox::State`.
 - Focus callbacks may expose `is_keyboard` when the framework wrapper needs focus-visible behavior.
-- Field-level validation callbacks must observe machine state after described-by and invalid attrs are settled.
+- Field-level validation callbacks must observe machine state after described-by, error-message, and invalid attrs are settled.
 
 ## 12. Failure and Degradation Rules
 
@@ -173,10 +217,10 @@ The checkbox instance owns a single `Root` / `Control` / `HiddenInput` identity.
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept      | Required? | Responsibility                                              | Notes                                  |
-| ------------------- | --------- | ----------------------------------------------------------- | -------------------------------------- |
-| hidden-input helper | required  | mirror checked state and form attrs into the hidden input   | shared with `switch` and `radio-group` |
-| field merge helper  | required  | merge described-by, disabled, readonly, and invalid context | reuse utility-layer field integration  |
+| Helper concept      | Required? | Responsibility                                                 | Notes                                  |
+| ------------------- | --------- | -------------------------------------------------------------- | -------------------------------------- |
+| hidden-input helper | required  | mirror checked state and form attrs into the hidden input      | shared with `switch` and `radio-group` |
+| field merge helper  | required  | merge form errors plus disabled, readonly, and invalid context | reuse utility-layer field integration  |
 
 ## 23. Framework-Specific Behavior
 
@@ -185,7 +229,7 @@ Dioxus should prefer plain props for the public surface, `use_context_provider` 
 ## 24. Canonical Implementation Sketch
 
 ```rust,no_check
-let machine = use_machine::<checkbox::Machine>(props);
+let machine = use_machine_with_reactive_props::<checkbox::Machine>(props_signal);
 let control_attrs = machine.derive(|api| api.control_attrs());
 let hidden_input_attrs = machine.derive(|api| api.hidden_input_attrs());
 
@@ -218,7 +262,7 @@ rsx! {
 ## 27. Accessibility and SSR Notes
 
 - `aria-describedby` must include `Description` first and `ErrorMessage` second when both exist.
-- `aria-errormessage` must only appear when invalid content is actually rendered.
+- `aria-errormessage` must only appear when the checkbox is invalid and invalid content is actually rendered.
 - SSR markup must not omit `HiddenInput`, because that would change the form-participation contract on hydration.
 
 ## 28. Parity Summary and Intentional Deviations
@@ -246,4 +290,5 @@ rsx! {
 - [ ] Synchronize controlled props through machine events, not local shadow state.
 - [ ] Preserve `Indeterminate` semantics in controlled mode.
 - [ ] Keep hidden-input submission and reset behavior adapter-owned.
-- [ ] Merge field-derived described-by, disabled, readonly, and invalid state.
+- [ ] Merge field-derived errors, disabled, readonly, and invalid state.
+- [ ] Register error message presence so invalid checkboxes do not emit dangling error IDREFs.

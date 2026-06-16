@@ -16,7 +16,9 @@ use ars_dioxus::{
 };
 use dioxus::prelude::*;
 
-use crate::categories::{i18n_registries, navigation::NavigationPanel, utility::UtilityPanel};
+use crate::categories::{
+    i18n_registries, input::InputPanel, navigation::NavigationPanel, utility::UtilityPanel,
+};
 
 fn main() {
     dioxus::launch(App);
@@ -27,6 +29,9 @@ fn main() {
 #[tab_key(ordinal)]
 #[translate(fallback = "en-US")]
 enum CategoryTab {
+    #[translate(en_US = "Input", pt_BR = "Entrada")]
+    Input,
+
     #[translate(en_US = "Navigation", pt_BR = "Navegação")]
     Navigation,
 
@@ -60,6 +65,7 @@ fn App() -> Element {
                 Tabs {
                     default_value: CategoryTab::Utility,
                     tabs: [
+                        Tab::new(CategoryTab::Input, InputPanel()),
                         Tab::new(CategoryTab::Navigation, NavigationPanel()),
                         Tab::new(CategoryTab::Utility, rsx! { UtilityPanel { locale_key } }),
                     ],

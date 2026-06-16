@@ -5,5 +5,6 @@ edition = "2024"
 publish = false
 
 [dependencies]
-ars-leptos = { path = "../../crates/ars-leptos", features = ["csr"] }
-leptos     = { version = "0.8", default-features = false, features = ["csr"] }
+ars-leptos            = { path = "../../crates/ars-leptos", features = ["csr"] }
+ars-leptos-components = { path = "../../crates/ars-leptos-components", features = ["csr"] }
+leptos                = { version = "0.8", default-features = false, features = ["csr"] }

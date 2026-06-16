@@ -22,5 +22,7 @@ ignore:
   - "crates/ars-test-harness-dioxus/**"
   - "crates/ars-e2e/**"
   - "crates/ars-derive/**"
+  - "crates/ars-leptos-components/**"
+  - "crates/ars-dioxus-components/**"
   - "examples/**"
   - "spec/**"

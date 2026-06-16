@@ -26,6 +26,7 @@ mod ephemeral;
 mod event_mapping;
 mod hydration;
 mod id;
+pub mod input;
 pub mod navigation;
 mod nonce;
 mod platform;
@@ -45,7 +46,8 @@ pub use attrs::{
     CssomStyleHandle, apply_styles_cssom, use_cssom_styles, use_cssom_styles_from_attrs,
 };
 pub use attrs::{
-    DioxusAttrResult, attr_map_to_dioxus, attr_map_to_dioxus_inline_attrs, use_style_strategy,
+    DioxusAttrResult, attr_map_to_dioxus, attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs,
+    root_class_attrs, use_style_strategy,
 };
 pub use callbacks::{call, emit, emit_map};
 pub use dioxus_stores;
@@ -78,7 +80,7 @@ pub use platform::{
 pub use provider::{
     ArsContext, ArsProvider, ArsProviderProps, Translatable, resolve_locale, t, use_direction,
     use_intl_backend, use_locale, use_messages_and_locale, use_modality_context,
-    use_number_formatter, use_platform_effects, warn_missing_provider,
+    use_number_formatter, use_platform_effects, use_t, warn_missing_provider,
 };
 #[cfg(feature = "web")]
 pub use safe_listener::{

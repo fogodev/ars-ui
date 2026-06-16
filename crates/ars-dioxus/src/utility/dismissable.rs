@@ -42,7 +42,7 @@ use {
 };
 
 use crate::{
-    as_child::merge_dioxus_attrs, attrs::attr_map_to_dioxus_inline_attrs, id::use_stable_id,
+    attrs::attr_map_to_dioxus_inline_attrs, id::use_stable_id, merge_dioxus_attrs,
     provider::use_messages_and_locale,
 };
 
