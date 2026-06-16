@@ -314,67 +314,62 @@ fn apply_attr_map(element: &web_sys::Element, attrs: &AttrMap) {
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn apply_attr_value(element: &web_sys::Element, attr: HtmlAttr, value: &AttrValue) {
-    match value {
-        AttrValue::String(value) => {
+    let attr_name = attr.to_string();
+
+    match live_region_attr_action(value) {
+        LiveRegionAttrAction::Set(value) => {
             crate::debug::warn_dom_error(
                 &format!("setting live region attribute {attr}"),
-                element.set_attribute(&attr.to_string(), value),
+                element.set_attribute(&attr_name, &value),
             );
         }
 
-        AttrValue::Bool(true) => {
+        LiveRegionAttrAction::SetBool => {
             crate::debug::warn_dom_error(
                 &format!("setting live region boolean attribute {attr}"),
-                element.set_attribute(&attr.to_string(), ""),
+                element.set_attribute(&attr_name, ""),
             );
         }
 
-        // Reactive variants are evaluated once at write time. The live
-        // region announcer doesn't subscribe to signals — it pushes a
-        // snapshot of the current message to the DOM. Reactive
-        // re-evaluation on the announcer happens when the caller decides
-        // to re-invoke `apply_attr_value` with an updated `AttrValue`.
-        AttrValue::Reactive(f) => {
-            crate::debug::warn_dom_error(
-                &format!("setting reactive live region attribute {attr}"),
-                element.set_attribute(&attr.to_string(), &f()),
-            );
-        }
-
-        AttrValue::ReactiveOptional(f) => {
-            if let Some(value) = f() {
-                crate::debug::warn_dom_error(
-                    &format!("setting reactive live region attribute {attr}"),
-                    element.set_attribute(&attr.to_string(), &value),
-                );
-            } else {
-                crate::debug::warn_dom_error(
-                    &format!("removing reactive live region attribute {attr}"),
-                    element.remove_attribute(&attr.to_string()),
-                );
-            }
-        }
-
-        AttrValue::ReactiveBool(f) => {
-            if f() {
-                crate::debug::warn_dom_error(
-                    &format!("setting reactive live region boolean attribute {attr}"),
-                    element.set_attribute(&attr.to_string(), ""),
-                );
-            } else {
-                crate::debug::warn_dom_error(
-                    &format!("removing reactive live region attribute {attr}"),
-                    element.remove_attribute(&attr.to_string()),
-                );
-            }
-        }
-
-        AttrValue::Bool(false) | AttrValue::None => {
+        LiveRegionAttrAction::Remove => {
             crate::debug::warn_dom_error(
                 &format!("removing live region attribute {attr}"),
-                element.remove_attribute(&attr.to_string()),
+                element.remove_attribute(&attr_name),
             );
         }
+    }
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+enum LiveRegionAttrAction {
+    Set(String),
+    SetBool,
+    Remove,
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn live_region_attr_action(value: &AttrValue) -> LiveRegionAttrAction {
+    match value {
+        AttrValue::String(value) => LiveRegionAttrAction::Set(value.clone()),
+        AttrValue::Bool(true) => LiveRegionAttrAction::SetBool,
+
+        // Reactive variants are evaluated once at write time. The live
+        // region announcer doesn't subscribe to signals; it pushes a snapshot
+        // of the current message to the DOM. Reactive re-evaluation happens
+        // when the caller re-invokes `apply_attr_value` with an updated value.
+        AttrValue::Reactive(f) => LiveRegionAttrAction::Set(f()),
+        AttrValue::ReactiveOptional(f) => f()
+            .map(LiveRegionAttrAction::Set)
+            .unwrap_or(LiveRegionAttrAction::Remove),
+        AttrValue::ReactiveBool(f) => {
+            if f() {
+                LiveRegionAttrAction::SetBool
+            } else {
+                LiveRegionAttrAction::Remove
+            }
+        }
+
+        AttrValue::Bool(false) | AttrValue::None => LiveRegionAttrAction::Remove,
     }
 }
 
