@@ -5,6 +5,10 @@ use ars_leptos::prelude::*;
 
 /// Leptos Tabs component styled with Tailwind utility classes.
 #[component]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "styled source template mirrors the documented Tabs semantic prop surface"
+)]
 pub fn Tabs<K>(
     /// Controlled selected tab key.
     #[prop(optional, into)]

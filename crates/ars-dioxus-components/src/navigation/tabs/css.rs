@@ -8,7 +8,7 @@ use ars_dioxus::prelude::*;
 pub const STYLES: &str = include_str!("tabs.css");
 
 /// Props for the CSS-styled Dioxus [`Tabs`] component.
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Debug)]
 pub struct TabsProps<K: TabKey> {
     /// Controlled selected tab key.
     #[props(optional)]

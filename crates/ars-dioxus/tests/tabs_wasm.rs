@@ -827,6 +827,41 @@ fn store_mutation_probe() -> Element {
     }
 }
 
+#[expect(
+    unused_qualifications,
+    reason = "Dioxus rsx event attributes in this probe expand in a way the lint currently flags"
+)]
+fn custom_close_trigger_hook_order_probe() -> Element {
+    let mut tabs = use_store(three_tabs);
+
+    let make_closable = move |_| {
+        tabs.write()[1] = tabs::Tab::new_with_label(
+            "second",
+            "Second",
+            rsx! { "Second" },
+            rsx! {
+                p { "Panel two" }
+            },
+        )
+        .closable(true);
+    };
+
+    rsx! {
+        button { id: "make-custom-close-trigger-closable", onclick: make_closable, "closable" }
+        Tabs { default_value: "first", tabs,
+            tabs::List::<StaticStr> {
+                tab_row: |item: tabs::TabRenderItem<StaticStr>| rsx! {
+                    tabs::TabShell { item,
+                        tabs::Trigger::<StaticStr> {}
+                        tabs::CloseTrigger::<StaticStr> {}
+                    }
+                },
+            }
+            tabs::Panels::<StaticStr> {}
+        }
+    }
+}
+
 fn close_mutates_store_probe() -> Element {
     let mut tabs = use_store(|| {
         three_tabs()
@@ -2472,6 +2507,47 @@ async fn web_store_mutations_update_tabs_without_remounting() {
     assert_eq!(
         second.get_attribute("aria-disabled").as_deref(),
         Some("true")
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_custom_close_trigger_preserves_hook_order_when_closability_changes() {
+    let parent = container();
+    let dom = VirtualDom::new(custom_close_trigger_hook_order_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert!(
+        parent
+            .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+            .expect("query should succeed")
+            .is_none(),
+        "custom close trigger should render nothing before the row is closable"
+    );
+
+    click(
+        &parent
+            .query_selector("#make-custom-close-trigger-closable")
+            .expect("query should succeed")
+            .expect("closable button")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert!(
+        parent
+            .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+            .expect("query should succeed")
+            .is_some(),
+        "custom close trigger should render after the row becomes closable"
     );
 }
 

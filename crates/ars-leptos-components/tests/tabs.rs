@@ -26,6 +26,15 @@ fn two_tabs() -> [TestTab; 2] {
 
 #[test]
 fn styled_tabs_forward_controlled_value_to_primitive_root() {
+    assert!(
+        css::STYLES.contains(r#"[data-ars-part="tab-shell"][data-ars-focus-visible]:not("#),
+        "CSS Tabs focus ring should consume mirrored shell focus state directly"
+    );
+    assert!(
+        !css::STYLES.contains(":has("),
+        "CSS Tabs focus ring should not depend on :has()"
+    );
+
     let html = render(|| {
         view! {
             <css::Tabs

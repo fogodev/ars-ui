@@ -8,6 +8,10 @@ pub const STYLES: &str = include_str!("tabs.css");
 
 /// Leptos Tabs component styled with stable CSS classes.
 #[component]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "styled source template mirrors the documented Tabs semantic prop surface"
+)]
 pub fn Tabs<K>(
     /// Controlled selected tab key.
     #[prop(optional, into)]

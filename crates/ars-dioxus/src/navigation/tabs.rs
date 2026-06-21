@@ -1226,10 +1226,6 @@ pub fn CloseTrigger<K: TabKey>(
         .iter()
         .any(|meta| meta.key == key && meta.closable && !meta.disabled);
 
-    if !can_close {
-        return rsx! {};
-    }
-
     let next_close_label = label_text.resolve();
     let mut close_label = use_signal(|| next_close_label.clone());
 
@@ -1244,6 +1240,10 @@ pub fn CloseTrigger<K: TabKey>(
     });
 
     let close_attrs = merge_dioxus_attrs(attrs, close_attrs());
+
+    if !can_close {
+        return rsx! {};
+    }
 
     rsx! {
         span {

@@ -3,7 +3,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use ars_dioxus::prelude::tabs;
-use ars_dioxus_components::navigation::tabs::tailwind;
+use ars_dioxus_components::navigation::tabs::{css, tailwind};
 use dioxus::prelude::*;
 
 type TestTab = tabs::Tab<&'static str>;
@@ -39,6 +39,18 @@ fn tailwind_tabs_indicator_consumes_adapter_measurement_variables() {
     ] {
         assert!(html.contains(fragment), "missing {fragment}: {html}");
     }
+}
+
+#[test]
+fn css_tabs_focus_ring_consumes_mirrored_shell_focus_state() {
+    assert!(
+        css::STYLES.contains(r#"[data-ars-part="tab-shell"][data-ars-focus-visible]:not("#),
+        "CSS Tabs focus ring should consume mirrored shell focus state directly"
+    );
+    assert!(
+        !css::STYLES.contains(":has("),
+        "CSS Tabs focus ring should not depend on :has()"
+    );
 }
 
 #[test]

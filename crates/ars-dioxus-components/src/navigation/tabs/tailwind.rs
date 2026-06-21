@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use ars_dioxus::prelude::*;
 
 /// Props for the Tailwind-styled Dioxus [`Tabs`] component.
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Debug)]
 pub struct TabsProps<K: TabKey> {
     /// Controlled selected tab key.
     #[props(optional)]

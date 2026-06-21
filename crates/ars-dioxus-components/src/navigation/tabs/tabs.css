@@ -28,9 +28,9 @@
 }
 
 .ars-tabs
-    [data-ars-part="tab-shell"]:has(
-        > [data-ars-part="tab"][data-ars-focus-visible]
-    ):not([data-ars-dragging]) {
+    [data-ars-part="tab-shell"][data-ars-focus-visible]:not(
+        [data-ars-dragging]
+    ) {
     border-radius: 0.375rem;
     outline: 2px solid #2563eb;
     outline-offset: 2px;
