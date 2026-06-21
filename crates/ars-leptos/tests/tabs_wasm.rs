@@ -4394,6 +4394,39 @@ fn reorder_announcement_uses_messages_template() {
     );
 }
 
+#[wasm_bindgen_test]
+fn wasm_attrs_observable_through_machine_connect_api() {
+    use ars_components::navigation::tabs as core_tabs;
+    use ars_core::{Env, HtmlAttr, Service};
+
+    // Direct unit test against the agnostic core exercised on wasm32.
+    // This keeps the Leptos browser-test matrix paired with the Dioxus
+    // wasm smoke that verifies connect API attributes on the wasm target.
+    let mut service = Service::<core_tabs::Machine>::new(
+        core_tabs::Props::new()
+            .id("test-tabs")
+            .default_value(Some(Key::str("first"))),
+        &Env::default(),
+        &core_tabs::Messages::default(),
+    );
+
+    drop(service.send(core_tabs::Event::SetTabs(vec![
+        core_tabs::TabRegistration::new(Key::str("first")),
+        core_tabs::TabRegistration::new(Key::str("second")),
+    ])));
+
+    let api = service.connect(&|_| {});
+
+    assert!(
+        api.root_attrs().get(&HtmlAttr::Data("ars-scope")).is_some(),
+        "wasm32 connect API must expose data-ars-scope"
+    );
+    assert!(
+        api.list_attrs().get(&HtmlAttr::Role).is_some(),
+        "wasm32 connect API must expose role on the list"
+    );
+}
+
 #[wasm_bindgen_test(async)]
 async fn close_label_uses_live_provider_messages_after_locale_changes() {
     let parent = container();
