@@ -9,13 +9,14 @@ mod specialized;
 mod utility;
 
 use ars_dioxus::prelude::*;
-use ars_dioxus_components::navigation::tabs::css::Tabs;
+use ars_dioxus_components::navigation::tabs::css::{STYLES as TABS_STYLE, Tabs};
 
 use crate::text::CategoryTab;
 
 #[component]
 pub(crate) fn CategoryTabs() -> Element {
     rsx! {
+        style { "{TABS_STYLE}" }
         Tabs {
             default_value: CategoryTab::Utility,
             tabs: [

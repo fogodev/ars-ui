@@ -91,6 +91,26 @@ fn tailwind_tabs_indicator_consumes_adapter_measurement_variables() {
 }
 
 #[test]
+fn tailwind_tabs_gates_closable_spacing_to_enabled_closable_rows() {
+    let html =
+        render(|| view! { <tailwind::Tabs default_value="first" tabs=two_tabs() /> }.to_html());
+
+    assert!(
+        html.contains("[data-ars-closable]:not([data-ars-disabled])]:pr-2"),
+        "shell spacing should require closable and enabled state: {html}"
+    );
+    assert!(
+        html.contains(r#".group[data-ars-closable]:not([data-ars-disabled])_"#)
+            && html.contains("]:pr-2"),
+        "trigger spacing should require closable and enabled shell state: {html}"
+    );
+    assert!(
+        !html.contains("data-ars-closable:pr-2"),
+        "Tailwind template should not reserve close spacing for disabled closable tabs: {html}"
+    );
+}
+
+#[test]
 fn tailwind_tabs_root_does_not_define_unnamed_group_scope() {
     let html =
         render(|| view! { <tailwind::Tabs default_value="first" tabs=two_tabs() /> }.to_html());
