@@ -522,8 +522,18 @@ struct TabsCommonContext {
 }
 
 #[derive(Clone, PartialEq)]
+struct TabsContextRevisionProps<K: TabKey> {
+    disallow_empty_selection: bool,
+    lazy_mount: bool,
+    unmount_on_exit: bool,
+    on_value_change: Option<EventHandler<Option<K>>>,
+    on_close_tab: Option<EventHandler<K>>,
+    on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
+}
+
+#[derive(Clone, Copy)]
 struct TabItemContext<K: TabKey> {
-    item: TabRenderItem<K>,
+    item: CopyValue<TabRenderItem<K>>,
 }
 
 /// Typed render item supplied by [`List`] and [`Panels`] when rendering
@@ -666,6 +676,15 @@ pub fn Root<K: TabKey>(props: RootProps<K>) -> Element {
     let mut context_revision = use_signal(|| 0_u64);
     let mut previous_context_tabs = use_signal(|| (*render_tabs).clone());
     let mut previous_context_config = use_signal(|| Rc::clone(&config));
+    let next_context_props = TabsContextRevisionProps {
+        disallow_empty_selection,
+        lazy_mount,
+        unmount_on_exit,
+        on_value_change,
+        on_close_tab,
+        on_reorder,
+    };
+    let mut previous_context_props = use_signal(|| next_context_props.clone());
 
     if *previous_context_tabs.peek() != *render_tabs {
         previous_context_tabs.set((*render_tabs).clone());
@@ -674,6 +693,11 @@ pub fn Root<K: TabKey>(props: RootProps<K>) -> Element {
 
     if *previous_context_config.peek() != config {
         previous_context_config.set(Rc::clone(&config));
+        *context_revision.write() += 1;
+    }
+
+    if *previous_context_props.peek() != next_context_props {
+        previous_context_props.set(next_context_props);
         *context_revision.write() += 1;
     }
 
@@ -877,14 +901,20 @@ pub fn TabShell<K: TabKey>(
 
     let key = Rc::new(item.tab.key.into_key());
 
-    let is_keyboard = !modality.had_pointer_interaction();
+    let shell_attrs = {
+        let key = Rc::clone(&key);
+        let modality = Arc::clone(&modality);
 
-    let shell_attrs = merge_dioxus_attrs(
-        attrs,
-        attr_map_to_dioxus_inline_attrs(
-            machine.with_api_snapshot(|api| api.tab_shell_attrs(&key, is_keyboard)),
-        ),
-    );
+        machine.derive(move |api| {
+            let _modality_revision = modality_revision();
+
+            attr_map_to_dioxus_inline_attrs(
+                api.tab_shell_attrs(&key, !modality.had_pointer_interaction()),
+            )
+        })
+    };
+
+    let shell_attrs = merge_dioxus_attrs(attrs, shell_attrs());
 
     let vdom_key = dioxus_vdom_key(&key);
     let draggable = config.reorderable.to_string();
@@ -938,7 +968,11 @@ pub fn TabShell<K: TabKey>(
         }
     };
 
-    use_context_provider(|| TabItemContext { item: item.clone() });
+    let mut item_context = use_hook(|| CopyValue::new(item.clone()));
+
+    item_context.set(item);
+
+    use_context_provider(|| TabItemContext { item: item_context });
 
     if let Some(children) = children {
         return rsx! {
@@ -1009,10 +1043,10 @@ pub fn Trigger<K: TabKey>(
         ..
     } = data.cloned();
 
-    let TabItemContext {
-        item: TabRenderItem { tab },
-    } = try_consume_context::<TabItemContext<K>>()
-        .expect("<tabs::Trigger> must be rendered inside <tabs::TabShell>");
+    let TabRenderItem { tab } = try_consume_context::<TabItemContext<K>>()
+        .expect("<tabs::Trigger> must be rendered inside <tabs::TabShell>")
+        .item
+        .cloned();
 
     let key = Rc::new(tab.key.into_key());
 
@@ -1172,19 +1206,18 @@ pub fn CloseTrigger<K: TabKey>(
         ..
     } = data.cloned();
 
-    let TabItemContext {
-        item:
-            TabRenderItem {
-                tab:
-                    Tab {
-                        key: typed_key,
-                        label_text,
-                        close_trigger,
-                        ..
-                    },
+    let TabRenderItem {
+        tab:
+            Tab {
+                key: typed_key,
+                label_text,
+                close_trigger,
+                ..
             },
     } = try_consume_context::<TabItemContext<K>>()
-        .expect("<tabs::CloseTrigger> must be rendered inside <tabs::TabShell>");
+        .expect("<tabs::CloseTrigger> must be rendered inside <tabs::TabShell>")
+        .item
+        .cloned();
 
     let key = typed_key.into_key();
 
@@ -1197,12 +1230,20 @@ pub fn CloseTrigger<K: TabKey>(
         return rsx! {};
     }
 
-    let close_attrs = merge_dioxus_attrs(
-        attrs,
-        attr_map_to_dioxus_inline_attrs(
-            machine.with_api_snapshot(move |api| api.close_trigger_attrs(&label_text.resolve())),
-        ),
-    );
+    let next_close_label = label_text.resolve();
+    let mut close_label = use_signal(|| next_close_label.clone());
+
+    if *close_label.peek() != next_close_label {
+        close_label.set(next_close_label);
+    }
+
+    let close_attrs = machine.derive(move |api| {
+        let close_label = close_label();
+
+        attr_map_to_dioxus_inline_attrs(api.close_trigger_attrs(&close_label))
+    });
+
+    let close_attrs = merge_dioxus_attrs(attrs, close_attrs());
 
     rsx! {
         span {

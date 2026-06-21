@@ -9,6 +9,10 @@ pub const STYLES: &str = include_str!("tabs.css");
 /// Leptos Tabs component styled with stable CSS classes.
 #[component]
 pub fn Tabs<K>(
+    /// Controlled selected tab key.
+    #[prop(optional, into)]
+    value: Option<Signal<Option<K>>>,
+
     /// Initial selected tab key in uncontrolled mode.
     #[prop(into)]
     default_value: K,
@@ -62,8 +66,8 @@ pub fn Tabs<K>(
     on_close_tab: Callback<K>,
 
     /// Called before a reorder request is emitted.
-    #[prop(optional, default = Callback::new(|_| true))]
-    on_reorder: Callback<tabs::ReorderEvent<K>, bool>,
+    #[prop(optional)]
+    on_reorder: Option<Callback<tabs::ReorderEvent<K>, bool>>,
 
     /// Consumer class tokens appended to the root.
     #[prop(optional, into)]
@@ -72,39 +76,51 @@ pub fn Tabs<K>(
 where
     K: TabKey,
 {
-    view! {
-        <tabs::Root
-            default_value
-            tabs
-            orientation
-            activation_mode
-            dir
-            loop_focus
-            disallow_empty_selection
-            lazy_mount
-            unmount_on_exit
-            disabled_keys
-            reorderable
-            on_value_change
-            on_close_tab
-            on_reorder
-            class=root_class("ars-tabs", class)
-        >
-            <tabs::List<
-            K,
-        >
-                class="ars-tabs__list"
-                tab_row=|item| {
-                    view! {
-                        <tabs::TabShell item class="ars-tabs__tab-shell">
-                            <tabs::Trigger<K> class="ars-tabs__tab" />
-                            <tabs::CloseTrigger<K> class="ars-tabs__close-trigger" />
-                        </tabs::TabShell>
-                    }
-                }
-            />
-            <tabs::Panels<K> class="ars-tabs__panels" />
-            <tabs::LiveRegion />
-        </tabs::Root>
+    macro_rules! tabs_view {
+        ($($optional:tt)*) => {
+            view! {
+                <tabs::Root
+                    $($optional)*
+                    default_value
+                    tabs
+                    orientation
+                    activation_mode
+                    dir
+                    loop_focus
+                    disallow_empty_selection
+                    lazy_mount
+                    unmount_on_exit
+                    disabled_keys
+                    reorderable
+                    on_value_change
+                    on_close_tab
+                    class=root_class("ars-tabs", class)
+                >
+                    <tabs::List<
+                    K,
+                >
+                        class="ars-tabs__list"
+                        tab_row=|item| {
+                            view! {
+                                <tabs::TabShell item class="ars-tabs__tab-shell">
+                                    <tabs::Trigger<K> class="ars-tabs__tab" />
+                                    <tabs::CloseTrigger<K> class="ars-tabs__close-trigger" />
+                                </tabs::TabShell>
+                            }
+                        }
+                    />
+                    <tabs::Panels<K> class="ars-tabs__panels" />
+                    <tabs::LiveRegion />
+                </tabs::Root>
+            }
+            .into_any()
+        };
+    }
+
+    match (value, on_reorder) {
+        (Some(value), Some(on_reorder)) => tabs_view!(value=value on_reorder=on_reorder),
+        (Some(value), None) => tabs_view!(value = value),
+        (None, Some(on_reorder)) => tabs_view!(on_reorder = on_reorder),
+        (None, None) => tabs_view!(),
     }
 }

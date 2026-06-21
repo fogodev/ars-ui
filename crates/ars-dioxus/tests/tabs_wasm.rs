@@ -1175,6 +1175,32 @@ fn unmounting_panel_probe() -> Element {
     }
 }
 
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+fn dynamic_lazy_mount_probe() -> Element {
+    let mut lazy_mount = use_signal(|| true);
+    let mut unmount_on_exit = use_signal(|| true);
+
+    rsx! {
+        button {
+            id: "disable-lazy-mount",
+            onclick: move |_| {
+                lazy_mount.set(false);
+                unmount_on_exit.set(false);
+            },
+            "disable"
+        }
+        Tabs {
+            default_value: "first",
+            tabs: use_store(three_tabs),
+            lazy_mount: lazy_mount(),
+            unmount_on_exit: unmount_on_exit(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct CloseKeyProbeProps {
     closed: Arc<Mutex<Vec<&'static str>>>,
@@ -1313,6 +1339,102 @@ fn inline_owned_reorder_probe() -> Element {
                 }),
             ],
             reorderable: true,
+        }
+    }
+}
+
+fn static_close_message_probe() -> Element {
+    let mut locale = use_signal(locales::en_us);
+
+    let onclick = move |_| locale.set(locales::br());
+
+    let mut registries = I18nRegistries::new();
+
+    registries.register(
+        MessagesRegistry::new(core_tabs::Messages::default()).register(
+            "pt-BR",
+            core_tabs::Messages {
+                close_tab_label: MessageFn::new(|label: &str, _locale: &ars_core::Locale| {
+                    format!("Fechar {label}")
+                }),
+                reorder_announce_label: MessageFn::new(
+                    |label: &str, position: usize, total: usize, _locale: &ars_core::Locale| {
+                        format!("{label} movida para a posição {position} de {total}")
+                    },
+                ),
+            },
+        ),
+    );
+
+    rsx! {
+        ArsProvider { locale, i18n_registries: Some(Arc::new(registries)),
+            button { id: "switch-static-close-locale", onclick, "pt-BR" }
+            Tabs {
+                default_value: "inbox",
+                tabs: [
+                    tabs::Tab::new_with_label("inbox", "Inbox", rsx! { "Inbox" }, rsx! {
+                        p { "Inbox panel" }
+                    })
+                        .closable(true),
+                    tabs::Tab::new_with_label(
+                        "archive",
+                        "Archive",
+                        rsx! { "Archive" },
+                        rsx! {
+                            p { "Archive panel" }
+                        },
+                    ),
+                ],
+            }
+        }
+    }
+}
+
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+fn same_key_tab_context_refresh_probe() -> Element {
+    let mut updated = use_signal(|| false);
+
+    let (label, trigger, close_trigger) = if updated() {
+        (
+            "Inbox updated",
+            rsx! { "Inbox updated" },
+            rsx! { "Close updated" },
+        )
+    } else {
+        ("Inbox", rsx! { "Inbox" }, rsx! { "Close" })
+    };
+
+    rsx! {
+        button { id: "update-same-key-tab", onclick: move |_| updated.set(true), "Update" }
+        Tabs {
+            default_value: "inbox",
+            tabs: [
+                tabs::Tab::new_with_label("inbox", label, trigger, rsx! {
+                    p { "Inbox panel" }
+                })
+                    .closable(true)
+                    .close_trigger(close_trigger),
+                tabs::Tab::new_with_label(
+                    "archive",
+                    "Archive",
+                    rsx! { "Archive" },
+                    rsx! {
+                        p { "Archive panel" }
+                    },
+                ),
+            ],
+            tabs::List::<StaticStr> {
+                tab_row: |item: tabs::TabRenderItem<StaticStr>| rsx! {
+                    tabs::TabShell { item,
+                        tabs::Trigger::<StaticStr> {}
+                        tabs::CloseTrigger::<StaticStr> {}
+                    }
+                },
+            }
+            tabs::Panels::<StaticStr> {}
         }
     }
 }
@@ -2550,6 +2672,47 @@ async fn web_translated_owned_tab_labels_update_when_locale_changes() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn web_static_close_trigger_label_reacts_to_provider_message_changes() {
+    let parent = container();
+    let dom = VirtualDom::new(static_close_message_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let close = parent
+        .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+        .expect("query should succeed")
+        .expect("close trigger should exist");
+
+    assert_eq!(
+        close.get_attribute("aria-label").as_deref(),
+        Some("Close Inbox")
+    );
+
+    click(
+        &parent
+            .query_selector("#switch-static-close-locale")
+            .expect("query should succeed")
+            .expect("locale button should render")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        close.get_attribute("aria-label").as_deref(),
+        Some("Fechar Inbox"),
+        "close trigger should recompute its aria-label when provider messages change"
+    );
+}
+
+#[wasm_bindgen_test(async)]
 async fn web_inline_array_owned_tabs_refresh_existing_panel_content() {
     let parent = container();
     let dom = VirtualDom::new(inline_owned_panel_state_probe);
@@ -2630,6 +2793,62 @@ async fn web_inline_array_owned_tabs_keep_refreshed_panel_after_close() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn web_tab_shell_context_refreshes_same_key_trigger_and_close_content() {
+    let parent = container();
+    let dom = VirtualDom::new(same_key_tab_context_refresh_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).text_content().unwrap_or_default(),
+        "Inbox"
+    );
+    assert_eq!(
+        first_with_data_part(&parent, "tab-close-trigger")
+            .text_content()
+            .unwrap_or_default(),
+        "Close"
+    );
+
+    click(
+        &parent
+            .query_selector("#update-same-key-tab")
+            .expect("query should succeed")
+            .expect("update button should render")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).text_content().unwrap_or_default(),
+        "Inbox updated",
+        "same-key trigger content should refresh through TabShell item context"
+    );
+    assert_eq!(
+        first_with_data_part(&parent, "tab-close-trigger")
+            .text_content()
+            .unwrap_or_default(),
+        "Close updated",
+        "same-key close content should refresh through TabShell item context"
+    );
+    assert_eq!(
+        first_with_data_part(&parent, "tab-close-trigger")
+            .get_attribute("aria-label")
+            .as_deref(),
+        Some("Close Inbox updated"),
+        "same-key close aria-label should use the refreshed row label"
+    );
+}
+
+#[wasm_bindgen_test(async)]
 async fn web_custom_parts_keep_closable_labels_after_selection_changes() {
     let parent = container();
     let dom = VirtualDom::new(custom_parts_closable_selection_probe);
@@ -2673,6 +2892,14 @@ async fn web_custom_parts_keep_closable_labels_after_selection_changes() {
             .get_attribute("data-ars-selected")
             .is_none(),
         "previously selected closable trigger should not keep selected styling attrs"
+    );
+    assert!(
+        !tab_shell_at(&parent, 1).has_attribute("data-ars-selected"),
+        "previously selected closable shell should not keep selected styling attrs"
+    );
+    assert!(
+        tab_shell_at(&parent, 2).has_attribute("data-ars-selected"),
+        "newly selected closable shell should receive selected styling attrs"
     );
     assert_eq!(
         tab_at(&parent, 2).text_content().unwrap_or_default(),
@@ -3286,6 +3513,49 @@ async fn web_panel_attrs_react_to_selection_changes() {
             .unwrap_or_default(),
         "Panel two",
         "panel hidden state and unmount_on_exit body should update with tab selection"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_non_config_prop_changes_refresh_child_context() {
+    let parent = container();
+    let dom = VirtualDom::new(dynamic_lazy_mount_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        parent
+            .query_selector_all(r#"[role="tabpanel"] p"#)
+            .expect("query should succeed")
+            .length(),
+        1,
+        "lazy_mount=true should initially render only the selected panel"
+    );
+
+    click(
+        &parent
+            .query_selector("#disable-lazy-mount")
+            .expect("query should succeed")
+            .expect("button should render")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        parent
+            .query_selector_all(r#"[role="tabpanel"] p"#)
+            .expect("query should succeed")
+            .length(),
+        3,
+        "lazy_mount prop changes should bump child context so panels mount immediately"
     );
 }
 
