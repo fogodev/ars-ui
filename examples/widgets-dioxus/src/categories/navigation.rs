@@ -1,8 +1,4 @@
-use ars_dioxus::{
-    navigation::tabs::{Tab, Tabs},
-    prelude::{TabKey, Translate, t},
-};
-use dioxus::prelude::*;
+use ars_dioxus::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, TabKey, Translate)]
 #[tab_key(ordinal)]
@@ -70,8 +66,8 @@ pub(crate) enum NavigationText {
     KeyboardClosable,
 
     #[translate(
-        en_US = "Closable tabs render an extra close button and accept Delete / Backspace to fire CloseTab.",
-        pt_BR = "Abas fecháveis renderizam um botão extra de fechar e aceitam Delete / Backspace para disparar CloseTab."
+        en_US = "Closable tabs render an extra close affordance and accept Delete / Backspace to fire CloseTab.",
+        pt_BR = "Abas fecháveis renderizam um acionador extra de fechar e aceitam Delete / Backspace para disparar CloseTab."
     )]
     ClosablePanel,
 
@@ -88,7 +84,7 @@ pub(crate) fn NavigationPanel() -> Element {
         section {
             h3 { {t(NavigationText::TabsHeading)} }
             p { {t(NavigationText::TabsDemoSummary)} }
-            Tabs {
+            tabs::Root {
                 default_value: NavigationTab::Overview,
                 tabs: [
                     Tab::new(NavigationTab::Overview, rsx! {
@@ -111,6 +107,20 @@ pub(crate) fn NavigationPanel() -> Element {
                     }).disabled(true),
                 ],
                 reorderable: true,
+                tabs::List::<NavigationTab> {
+                    tab_row: |item| rsx! {
+                        tabs::TabShell { item,
+                            tabs::Trigger::<NavigationTab> {}
+                            tabs::CloseTrigger::<NavigationTab> {}
+                        }
+                    },
+                }
+                tabs::Panels::<NavigationTab> {
+                    panel: |item| rsx! {
+                        tabs::Panel { item }
+                    },
+                }
+                tabs::LiveRegion {}
             }
         }
     }

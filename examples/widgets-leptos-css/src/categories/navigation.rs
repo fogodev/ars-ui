@@ -1,7 +1,5 @@
-use ars_leptos::{
-    navigation::tabs::{Tab, Tabs},
-    prelude::{TabKey, Translate, t},
-};
+use ars_leptos::prelude::{Tab, TabKey, Translate, t};
+use ars_leptos_components::navigation::tabs::css::Tabs;
 use leptos::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, TabKey, Translate)]
@@ -70,8 +68,8 @@ pub(crate) enum NavigationText {
     KeyboardClosable,
 
     #[translate(
-        en_US = "Closable tabs render an extra close button and accept Delete / Backspace to fire CloseTab.",
-        pt_BR = "Abas fecháveis renderizam um botão extra de fechar e aceitam Delete / Backspace para disparar CloseTab."
+        en_US = "Closable tabs render an extra close affordance and accept Delete / Backspace to fire CloseTab.",
+        pt_BR = "Abas fecháveis renderizam um acionador extra de fechar e aceitam Delete / Backspace para disparar CloseTab."
     )]
     ClosablePanel,
 

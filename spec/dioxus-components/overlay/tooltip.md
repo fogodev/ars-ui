@@ -395,7 +395,7 @@ pub fn Tooltip(props: TooltipProps) -> Element {
         let mut prev_open: Signal<Option<bool>> = use_signal(|| None);
         use_effect(move || {
             let new_open = *open_sig.read();
-            let prev = prev_open.read().clone();
+            let prev = prev_open.cloned();
             if prev.as_ref() != Some(&new_open) {
                 if prev.is_some() {
                     if new_open {

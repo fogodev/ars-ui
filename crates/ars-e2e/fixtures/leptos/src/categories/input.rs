@@ -58,7 +58,7 @@ pub fn InputPanel() -> impl IntoView {
             </Checkbox>
             <Checkbox
                 id="leptos-fixture-checkbox-controlled"
-                checked=controlled.into()
+                checked=controlled
                 on_checked_change=Callback::new(move |next| set_controlled.set(next))
             >
                 "Controlled"
@@ -82,7 +82,7 @@ pub fn InputPanel() -> impl IntoView {
                     id="leptos-fixture-checkbox-form-value"
                     name="notifications"
                     value="email"
-                    checked=form_value.into()
+                    checked=form_value
                     default_checked=State::Checked
                     on_checked_change=Callback::new(move |next| set_form_value.set(next))
                 >

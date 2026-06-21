@@ -124,7 +124,11 @@ pub struct Options {
 pub async fn run(options: Options) -> Result<(), Error> {
     let session = start_widget_session(&options).await?;
 
-    let run = run_checkbox_smoke(&session.driver, &session.url, options.example).await;
+    let run = async {
+        run_checkbox_smoke(&session.driver, &session.url, options.example).await?;
+        run_tabs_smoke(&session.driver, &session.url, options.example).await
+    }
+    .await;
     let quit = session.quit().await;
 
     run?;
@@ -315,8 +319,177 @@ async fn run_checkbox_smoke(driver: &WebDriver, url: &str, example: Example) -> 
     assert_clean_console(driver).await
 }
 
+async fn run_tabs_smoke(driver: &WebDriver, url: &str, example: Example) -> Result<(), Error> {
+    open_navigation_panel(driver, url).await?;
+    assert_clean_console(driver).await?;
+
+    for label in ["Overview", "Keyboard", "Closable", "Disabled"] {
+        visible_tab(driver, label).await?;
+    }
+
+    let overview = visible_tab(driver, "Overview").await?;
+    let keyboard = visible_tab(driver, "Keyboard").await?;
+    let disabled = visible_tab(driver, "Disabled").await?;
+    let close_affordance = visible_close_affordance(driver).await?;
+
+    assert_attr(&overview, "aria-selected", "true").await?;
+    assert_attr(&keyboard, "aria-selected", "false").await?;
+    assert_attr(&disabled, "aria-disabled", "true").await?;
+    assert_attr(&close_affordance, "aria-hidden", "true").await?;
+
+    assert_nonzero_box(driver, &overview, "tabs Overview tab").await?;
+    assert_nonzero_box(driver, &keyboard, "tabs Keyboard tab").await?;
+    assert_nonzero_box(driver, &close_affordance, "tabs close affordance").await?;
+
+    if example.is_styled() {
+        assert_tabs_visual_deltas(driver).await?;
+    }
+
+    keyboard.click().await?;
+    wait_for_tab_attr(driver, "Keyboard", "aria-selected", "true").await?;
+
+    keyboard.focus().await?;
+    driver
+        .action_chain()
+        .send_keys(Key::Right)
+        .perform()
+        .await?;
+    wait_for_active_tab_contains(driver, "Closable").await?;
+
+    driver
+        .action_chain()
+        .send_keys(Key::Delete)
+        .perform()
+        .await?;
+    wait_for_tab_absent(driver, "Closable").await?;
+    wait_for_active_tab_contains(driver, "Keyboard").await?;
+
+    select_locale(driver, "pt-BR").await?;
+    wait_for_body_text(driver, "Abas").await?;
+    visible_tab(driver, "Teclado").await?;
+
+    assert_clean_console(driver).await
+}
+
+async fn open_navigation_panel(driver: &WebDriver, url: &str) -> Result<(), Error> {
+    driver.goto(url).await?;
+    select_locale(driver, "en-US").await?;
+
+    let navigation = visible_tab(driver, "Navigation").await?;
+
+    driver
+        .execute("arguments[0].click();", vec![navigation.to_json()?])
+        .await?;
+
+    wait_for_body_text(driver, "Live demo of the Tabs adapter").await
+}
+
 async fn checkbox_control(root: &WebElement) -> Result<WebElement, Error> {
     Ok(root.find(By::Css("[data-ars-part='control']")).await?)
+}
+
+async fn visible_close_affordance(driver: &WebDriver) -> Result<WebElement, Error> {
+    let close_affordances = driver
+        .find_all(By::Css(
+            "[data-ars-scope='tabs'][data-ars-part='tab-close-trigger']",
+        ))
+        .await?;
+
+    for close_affordance in close_affordances {
+        if close_affordance.is_displayed().await? {
+            return Ok(close_affordance);
+        }
+    }
+
+    Err(Error::Assertion(
+        "tabs widget must render a visible close affordance".to_string(),
+    ))
+}
+
+async fn visible_tab(driver: &WebDriver, label: &str) -> Result<WebElement, Error> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+
+    while Instant::now() < deadline {
+        let tabs = driver.find_all(By::Css("[role='tab']")).await?;
+
+        for tab in tabs.into_iter().rev() {
+            let text = tab.text().await?;
+
+            if text.contains(label) && tab.is_displayed().await? {
+                return Ok(tab);
+            }
+        }
+
+        time::sleep(Duration::from_millis(50)).await;
+    }
+
+    Err(Error::Timeout(format!(
+        "timed out waiting for visible widget tab {label:?}"
+    )))
+}
+
+async fn wait_for_tab_attr(
+    driver: &WebDriver,
+    label: &str,
+    name: &str,
+    expected: &str,
+) -> Result<(), Error> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    while Instant::now() < deadline {
+        let tab = visible_tab(driver, label).await?;
+        let value = tab.attr(name).await?;
+
+        if value.as_deref() == Some(expected) {
+            return Ok(());
+        }
+
+        time::sleep(Duration::from_millis(50)).await;
+    }
+
+    Err(Error::Assertion(format!(
+        "widget tab {label:?} must have {name:?}={expected:?}"
+    )))
+}
+
+async fn wait_for_active_tab_contains(driver: &WebDriver, label: &str) -> Result<(), Error> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    while Instant::now() < deadline {
+        let active = driver.active_element().await?;
+        let role = active.attr("role").await?;
+        let text = active.text().await?;
+
+        if role.as_deref() == Some("tab") && text.contains(label) {
+            return Ok(());
+        }
+
+        time::sleep(Duration::from_millis(50)).await;
+    }
+
+    Err(Error::Assertion(format!(
+        "active widget tab must contain {label:?}"
+    )))
+}
+
+async fn wait_for_tab_absent(driver: &WebDriver, label: &str) -> Result<(), Error> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    loop {
+        match visible_tab(driver, label).await {
+            Ok(_) if Instant::now() >= deadline => {
+                return Err(Error::Assertion(format!(
+                    "widget tab {label:?} is still present"
+                )));
+            }
+
+            Ok(_) => time::sleep(Duration::from_millis(50)).await,
+
+            Err(Error::Timeout(_)) => return Ok(()),
+
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 async fn assert_control_box_stable(driver: &WebDriver, element: &WebElement) -> Result<(), Error> {
@@ -348,6 +521,35 @@ async fn assert_control_box_stable(driver: &WebDriver, element: &WebElement) -> 
     Ok(())
 }
 
+async fn assert_nonzero_box(
+    driver: &WebDriver,
+    element: &WebElement,
+    label: &str,
+) -> Result<(), Error> {
+    let value = driver
+        .execute(
+            r#"
+            const rect = arguments[0].getBoundingClientRect();
+            return {
+                width: rect.width,
+                height: rect.height
+            };
+            "#,
+            vec![element.to_json()?],
+        )
+        .await?;
+
+    let value = value.json();
+
+    for key in ["width", "height"] {
+        if number_field(value, key)? <= 0.0 {
+            return Err(Error::Assertion(format!("{label} must have nonzero {key}")));
+        }
+    }
+
+    Ok(())
+}
+
 async fn assert_checkbox_visual_deltas(driver: &WebDriver) -> Result<(), Error> {
     let unchecked = control_style(driver, "checkbox-unchecked").await?;
 
@@ -373,6 +575,26 @@ async fn assert_checkbox_visual_deltas(driver: &WebDriver) -> Result<(), Error> 
     if disabled.opacity == unchecked.opacity {
         return Err(Error::Assertion(
             "disabled checkbox opacity must differ from unchecked".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+async fn assert_tabs_visual_deltas(driver: &WebDriver) -> Result<(), Error> {
+    let overview = tab_style(driver, "Overview").await?;
+    let keyboard = tab_style(driver, "Keyboard").await?;
+    let disabled = tab_style(driver, "Disabled").await?;
+
+    if overview.background_color == keyboard.background_color && overview.color == keyboard.color {
+        return Err(Error::Assertion(
+            "selected tabs widget style must differ from unselected tabs".to_string(),
+        ));
+    }
+
+    if disabled.opacity == keyboard.opacity && disabled.cursor == keyboard.cursor {
+        return Err(Error::Assertion(
+            "disabled tabs widget style must differ from enabled tabs".to_string(),
         ));
     }
 
@@ -517,11 +739,47 @@ async fn control_style(driver: &WebDriver, root_id: &str) -> Result<ControlStyle
     })
 }
 
+async fn tab_style(driver: &WebDriver, label: &str) -> Result<TabStyle, Error> {
+    let tab = visible_tab(driver, label).await?;
+
+    let value = driver
+        .execute(
+            r#"
+            const style = getComputedStyle(arguments[0]);
+            return {
+                backgroundColor: style.backgroundColor,
+                color: style.color,
+                cursor: style.cursor,
+                opacity: style.opacity
+            };
+            "#,
+            vec![tab.to_json()?],
+        )
+        .await?;
+
+    let value = value.json();
+
+    Ok(TabStyle {
+        background_color: string_field(value, "backgroundColor")?,
+        color: string_field(value, "color")?,
+        cursor: string_field(value, "cursor")?,
+        opacity: string_field(value, "opacity")?,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ControlStyle {
     border_color: String,
     background_color: String,
     color: String,
+    opacity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TabStyle {
+    background_color: String,
+    color: String,
+    cursor: String,
     opacity: String,
 }
 
@@ -557,6 +815,31 @@ async fn assert_locale_switch(driver: &WebDriver) -> Result<(), Error> {
     portuguese.click().await?;
 
     wait_for_body_text(driver, "Estados de checkbox").await
+}
+
+async fn select_locale(driver: &WebDriver, locale: &str) -> Result<(), Error> {
+    let switcher = wait_for_locale_switcher(driver).await?;
+    let xpath = format!(".//button[normalize-space()='{locale}']");
+    let button = switcher.find(By::XPath(xpath.as_str())).await?;
+
+    button.click().await?;
+
+    Ok(())
+}
+
+async fn wait_for_locale_switcher(driver: &WebDriver) -> Result<WebElement, Error> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+
+    while Instant::now() < deadline {
+        match driver.find(By::Css(".locale-switcher")).await {
+            Ok(switcher) => return Ok(switcher),
+            Err(_) => time::sleep(Duration::from_millis(50)).await,
+        }
+    }
+
+    Err(Error::Timeout(
+        "timed out waiting for widget locale switcher".to_string(),
+    ))
 }
 
 async fn wait_for_body_text(driver: &WebDriver, needle: &str) -> Result<(), Error> {

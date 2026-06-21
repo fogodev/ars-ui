@@ -146,7 +146,7 @@ Dioxus should measure the mounted ring node through a stable mounted handle and 
 pub fn ColorWheel() -> Element {
     let machine = use_machine::<color_wheel::Machine>(color_wheel::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
-    rsx! { div { ..root_attrs.read().clone() } }
+    rsx! { div { ..root_attrs.cloned() } }
 }
 ```
 

@@ -195,11 +195,11 @@ Dioxus should keep prop synchronization for numeric constraints narrow, attach w
 let machine = use_machine::<number_input::Machine>(props);
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        label { ..machine.derive(|api| api.label_attrs()).read().clone(), {children} }
-        input { ..machine.derive(|api| api.input_attrs()).read().clone() }
-        button { ..machine.derive(|api| api.increment_trigger_attrs()).read().clone() }
-        button { ..machine.derive(|api| api.decrement_trigger_attrs()).read().clone() }
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
+        label { ..machine.derive(|api| api.label_attrs()).cloned(), {children} }
+        input { ..machine.derive(|api| api.input_attrs()).cloned() }
+        button { ..machine.derive(|api| api.increment_trigger_attrs()).cloned() }
+        button { ..machine.derive(|api| api.decrement_trigger_attrs()).cloned() }
     }
 }
 ```

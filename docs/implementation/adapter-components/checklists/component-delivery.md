@@ -57,18 +57,27 @@ workflow docs.
 - [ ] Dioxus root `class`, `style`, `data-*`, `lang`, `tabindex`, and extra `aria-*` attrs flow through `GlobalAttributes`, not duplicated explicit props, unless a documented semantic or non-root-part reason requires otherwise.
 - [ ] Dioxus tests prove `class:` and `style:` forwarding through global attrs for styled components.
 - [ ] Multi-part components expose compound part components for stylable anatomy instead of repeated root-level `*_class` / `*_style` props.
+- [ ] Core anatomy nodes are explicitly classified as public part components or private/internal anatomy nodes; private nodes are not listed in public API snippets.
+- [ ] Visible behavior-critical subparts kept private are documented in the adapter spec with the reason and supported customization path.
+- [ ] Public adapter parts do not expose raw converted attrs such as `Vec<LeptosAttribute>` or raw Dioxus `Vec<Attribute>` without `GlobalAttributes`; raw-attr helpers are private or redesigned as context-driven parts.
+- [ ] Collection-backed custom anatomy uses typed renderers fed from the root collection source, not duplicated key lists in consumer markup.
+- [ ] Typed collection renderers live on the collection-owning primitive when that is needed to preserve key-type inference, with collection parts invoking them through context.
 - [ ] Dioxus compound parts use `GlobalAttributes`; Leptos compound parts expose reactive `TextProp` class/style until a broader global-attrs surface exists.
 - [ ] Machine-backed compound parts use `UseMachineReturn::part_attrs` unless the part needs adapter-specific dynamic attrs, event handlers, refs, or renderer-only behavior.
 - [ ] Leptos compound parts with local dynamic attrs use shared `apply_part_attrs` for final `class` / `style` merge and attr conversion.
 - [ ] Dynamic Leptos attrs derived from machine part attrs use `UseMachineReturn::attr_*_memo` methods instead of component-local memo copies.
+- [ ] Leptos typed renderer examples/tests use formatter-safe local renderer values when inline typed closure props are brittle under `leptosfmt`.
 - [ ] `StoredValue` / `CopyValue` used for shared captured values.
 - [ ] Changed Dioxus adapter files have stable top-level hook order: no hooks inside `unwrap_or_else`, `map_or_else`, conditionals, loops, iterator adapters, nested closures, or early-return branches.
 - [ ] Dioxus fallback-hook search run against the changed Dioxus files and every hit fixed or justified: `rg 'unwrap_or_else\(\|\| use_|map_or_else\([^\n]*use_' <changed-dioxus-files>`.
+- [ ] Stateful Dioxus components rendered in collection maps put the stable key on the component invocation, not only on an inner DOM node.
 - [ ] Public primitive renames ran a stale-symbol scan across adapters, tests, widgets, E2E fixtures/harnesses, specs, sketches, and `xtask` snippets.
+- [ ] Public primitives made private have regression coverage proving stale public symbols do not remain exported or documented.
 
 ## Tests And Examples
 
 - [ ] Adapter SSR/unit tests added.
+- [ ] SSR/unit tests prove typed collection renderers receive typed item context from the single root collection source when renderer overrides exist.
 - [ ] Composition integration tests added for every consumed context.
 - [ ] Form controls have `Form` and `Fieldset` integration tests covering submit, reset, inherited disabled/readonly/invalid, matching validation errors by `name`, and unmatched errors ignored.
 - [ ] Wasm tests added for focused adapter/browser wiring that SSR cannot prove: DOM-mounted attrs, generated ids, relationship attrs, callback dispatch, and reactive DOM updates where applicable.
@@ -88,7 +97,7 @@ workflow docs.
 - [ ] Computed visual assertions cover visible states.
 - [ ] Widgets examples updated in all six crates.
 - [ ] Widgets import ready-made visual components from `ars-leptos-components` / `ars-dioxus-components` when styled templates exist.
-- [ ] Plain widgets compose adapter primitives directly; CSS/Tailwind widgets import the matching styled source-template variants.
+- [ ] Plain widgets compose adapter primitives directly and do not import `ars-*-components`; CSS/Tailwind widgets import the matching styled source-template variants.
 - [ ] Widget examples import adapter/framework APIs through `ars_leptos::prelude::*` or `ars_dioxus::prelude::*` as much as possible; deep adapter/framework imports are used only when an item is not intentionally prelude-exported.
 - [ ] Component docs state whether consumers should use adapter primitives, styled crate templates, or future `ars-ui` copied source for customization.
 - [ ] Tailwind widget examples style component anatomy with Tailwind classes, public compound parts, and/or Tailwind arbitrary variants, not Rust string CSS or private widget-only selectors.
@@ -104,6 +113,7 @@ workflow docs.
 
 - [ ] Spec drift fixed in same PR.
 - [ ] Focused checks pass.
+- [ ] Any final API shape that intentionally differs from the original plan is documented in the specs/sketch with tests for the supported path.
 - [ ] `cargo xclippy` run before user handoff, with changed-code warnings fixed or explicitly justified.
 - [ ] `cargo xtask lint adapter-parity` passes without component skips.
 - [ ] Parity audit loop pass 1 completed: reference outcomes reviewed and split by user-visible behavior.

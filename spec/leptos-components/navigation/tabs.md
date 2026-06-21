@@ -16,27 +16,83 @@ This spec maps the core [`Tabs`](../../components/navigation/tabs.md) contract o
 
 ```rust,no_check
 #[component]
-pub fn Tabs<K: TabKey>(
+pub fn Root<K: TabKey>(
     #[prop(optional, into)] value: Option<Signal<Option<K>>>,
     #[prop(into)]
     default_value: K,
     #[prop(into)] tabs: tabs::TabsSource<K>,
-    #[prop(optional)] orientation: Orientation,
-    #[prop(optional)] activation_mode: tabs::ActivationMode,
-    #[prop(optional)] dir: Direction,
-    #[prop(optional)] loop_focus: bool,
-    #[prop(optional)] disallow_empty_selection: bool,
-    #[prop(optional)] lazy_mount: bool,
-    #[prop(optional)] unmount_on_exit: bool,
-    #[prop(optional)] disabled_keys: BTreeSet<K>,
-    #[prop(optional)] reorderable: bool,
+    #[prop(optional, into)] orientation: Option<Signal<Orientation>>,
+    #[prop(optional, into)] activation_mode: Option<Signal<tabs::ActivationMode>>,
+    #[prop(optional, into)] dir: Option<Signal<Direction>>,
+    #[prop(optional, into)] loop_focus: Option<Signal<bool>>,
+    #[prop(optional, into)] disallow_empty_selection: Option<Signal<bool>>,
+    #[prop(optional, into)] lazy_mount: Option<Signal<bool>>,
+    #[prop(optional, into)] unmount_on_exit: Option<Signal<bool>>,
+    #[prop(optional, into)] disabled_keys: Option<Signal<BTreeSet<K>>>,
+    #[prop(optional, into)] reorderable: Option<Signal<bool>>,
     #[prop(optional)] on_value_change: Option<Callback<Option<K>>>,
     #[prop(optional)] on_close_tab: Option<Callback<K>>,
     #[prop(optional)] on_reorder: Option<Callback<tabs::ReorderEvent<K>, bool>>,
+    #[prop(optional, into)] class: Option<TextProp>,
     #[prop(optional)] children: Option<Children>,
 ) -> impl IntoView
 where
     K: TabKey,
+
+#[component]
+pub fn List<K: TabKey>(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+    #[prop(optional, into)] tab_row: Option<TabRenderer<K>>,
+) -> impl IntoView
+
+#[component]
+pub fn Panels<K: TabKey>(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+    #[prop(optional, into)] panel: Option<TabPanelRenderer<K>>,
+) -> impl IntoView
+
+#[derive(Clone, Debug)]
+pub struct TabRenderItem<K: TabKey> {
+    pub tab: Tab<K>,
+}
+
+#[derive(Clone)]
+pub struct TabRenderer<K: TabKey>(/* private */);
+
+#[derive(Clone)]
+pub struct TabPanelRenderer<K: TabKey>(/* private */);
+
+#[component]
+pub fn TabShell<K: TabKey>(
+    item: TabRenderItem<K>,
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+    #[prop(optional)] children: Option<Children>,
+) -> impl IntoView
+
+#[component]
+pub fn Trigger<K: TabKey>(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+) -> impl IntoView
+
+#[component]
+pub fn CloseTrigger<K: TabKey>(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+) -> impl IntoView
+
+#[component]
+pub fn Panel<K: TabKey>(
+    item: TabRenderItem<K>,
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+) -> impl IntoView
+
+#[component]
+pub fn LiveRegion() -> impl IntoView
 ```
 
 `K` is a typed public tab identifier that implements `TabKey`
@@ -63,22 +119,56 @@ store source (push, remove, reorder, swap of a tab's `closable` or
 `disabled` flag) re-dispatch `Event::SetTabs` / `Event::SyncProps`
 automatically without remounting the `Tabs` component.
 
-`Tabs` is a single, monolithic compound component: per-tab content is
-supplied via the `tabs` field (each `Tab` carries its own label,
-panel content, optional link `href`, and per-row `disabled` /
-`closable` flags). Consumers do not compose individual `<Tab>` /
-`<TabsPanel>` parts; the adapter renders the full anatomy internally.
+`Root` is the machine and collection owner. It does not render a
+closed Tabs anatomy by itself; consumers compose `List`, `Panels`, and
+`LiveRegion` as children. `List` and `Panels` iterate the single
+`tabs: TabsSource<K>` collection supplied to `Root`, so consumers do
+not manually repeat or stringify tab keys.
+
+`Root::children` intentionally uses optional `Children`, not
+`TypedChildren<T>`. The root slot is a heterogeneous composition area for
+public parts and local decoration after context publication; it does not have a
+single typed child-root contract, does not forward attrs through `add_attr`, and
+does not consume child values to establish tab identity. Tabs type-safety is
+instead provided by `TabsSource<K>`, `TabRenderItem<K>`, and the typed
+renderer callbacks on `List<K>` / `Panels<K>`. Keeping `children` optional also permits tests and
+partial compositions to render the root/context wrapper without forcing a
+placeholder child.
+
+`List` renders one public `TabShell` for each row and an internal
+indicator node. `Panels` renders one public `Panel` for each row. The typed
+`TabRenderItem<K>` handed to `TabShell` / `Panel` carries the row data
+from the root collection order. For custom anatomy, `List<K>::tab_row`
+and `Panels<K>::panel` accept typed row renderers that receive
+`TabRenderItem<K>` values from the same `TabsSource<K>`. Consumers still do
+not duplicate key order; they only arrange public adapter parts for each row.
+`TabShell` publishes that row to descendant `Trigger<K>` and
+`CloseTrigger<K>` parts through typed context, so those child parts do not
+accept an `item` prop. Consumers spell the key type explicitly when Rust
+cannot infer it from props.
+Default `List` / `Panels` calls must spell the key type, for example
+`<tabs::List<SettingsTab> />`, because the renderer props live on generic
+collection parts instead of on `Root`.
+
+The public trigger part is named `Trigger` rather than `Tab` because
+`tabs::Tab<K>` remains the row-data constructor. `Trigger` and
+`CloseTrigger` own their adapter event policy, refs, ARIA, disabled guards,
+and localized labels; custom renderers compose them instead of rebuilding
+that behavior. `Tab::close_trigger` replaces only the visible glyph/content
+inside the adapter-owned close affordance.
 
 `Tab::new(key, panel)` is the preferred constructor for static application
 tab lists. It requires `K: TabKey + Translate`, uses the key enum's
 translation as the default visible trigger, and uses the same translated
-semantic text for close-button labels and reorder announcements. Use
+semantic text for close-affordance labels and reorder announcements. Use
 `Tab::new_static(key, label_text, panel)` when the label is static text that
 does not need i18n, `Tab::new_with_label(key, label_text, trigger, panel)`
 when the visible trigger is a custom view, and `.trigger(view)` to replace
 only the visible trigger while preserving the translated semantic label.
+Use `.close_trigger(view)` to replace the fallback close glyph while
+leaving close semantics and accessible labeling adapter-owned.
 
-The adapter owns ordered tab registration, selected-tab indicator measurement, panel presence policy, closable-tab trigger semantics, and reorder announcements.
+The adapter owns ordered tab registration, selected-tab indicator measurement, renderer application of the core panel-presence predicate, closable-tab trigger semantics, and reorder announcements.
 
 Tab labels carry semantic text separately from custom trigger views:
 
@@ -96,67 +186,128 @@ impl TabLabel {
         T: Translate + Send + Sync + 'static;
     pub fn dynamic(text: impl Into<TextProp>) -> Self;
     pub fn resolve(&self) -> String;
-    pub fn resolve_untracked(&self) -> String;
+    pub fn debug_label(&self) -> String;
 }
 ```
 
 `Static` is for non-localized literals. `Dynamic` is the required shape for
 provider-backed i18n or any other reactive semantic label. The adapter uses the
-resolved label for default visible triggers, close-button accessible names, and
+resolved label for default visible triggers, close-affordance labels, and
 reorder announcements; a custom trigger view must not be the only source of
 semantic tab text.
+
+End-user prelude imports expose the `tabs` module only. Consumers must spell
+primitive parts and row-data helpers through that namespace, for example
+`tabs::Root`, `tabs::List`, `tabs::Tab`, and `tabs::TabsSource`; adapter
+preludes do not flatten component parts into the application namespace. The
+closed ready-made `Tabs` component lives only in
+`ars-leptos-components::navigation::tabs::{css,tailwind}`.
 
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with selected tab, activation mode, orientation, direction, disabled keys, and lazy panel behavior.
 - State parity: full parity with selected tab, focused tab, and focus-visible state.
-- Anatomy parity: the adapter renders the full anatomy (`Root`, `List`,
-  repeated `Tab`, `Panel`, `Indicator`, plus closable variant
-  `CloseTrigger`) internally. Per-row content is passed through the
-  `tabs: TabsSource<K>` prop (`Tab` carries label / panel /
-  link / closable / disabled flags); consumers do not nest individual
-  `<Tab>` / `<TabsPanel>` components.
+- Anatomy parity: the adapter exposes unstyled primitive parts
+  (`Root`, `List`, `Panels`, `TabShell`, `Trigger`, `CloseTrigger`, `Panel`,
+  `LiveRegion`) while keeping focus, selection, reorder, indicator
+  measurement, and ARIA policy adapter-owned.
 - Adapter additions: explicit ordered registration, measurement helpers, and live-region ownership for reorder announcements.
 
 ## 4. Part Mapping
 
-| Core part / structure | Required?   | Adapter rendering target                                                       | Ownership     | Attr source                                 | Notes                                  |
-| --------------------- | ----------- | ------------------------------------------------------------------------------ | ------------- | ------------------------------------------- | -------------------------------------- |
-| `Root`                | required    | `<div>`                                                                        | adapter-owned | `api.root_attrs()`                          | owns context and panel presence policy |
-| `List`                | required    | `<div>`                                                                        | adapter-owned | `api.list_attrs()`                          | `role="tablist"`                       |
-| `Tab`                 | repeated    | `<a>` for link tabs; otherwise a role-backed focus target such as `<div>`      | adapter-owned | `api.tab_attrs(key, panel_id)`              | roving focus target                    |
-| `Indicator`           | optional    | `<span>`                                                                       | adapter-owned | `api.tab_indicator_attrs()`                 | measurement-driven visual part         |
-| `Panel`               | repeated    | `<div>`                                                                        | adapter-owned | `api.panel_attrs(key, tab_id)`              | `role="tabpanel"`                      |
-| `CloseTrigger`        | conditional | non-tabbable nested element; avoid a nested native control inside the tab root | adapter-owned | adapter-owned attrs plus core variant rules | closable tabs only                     |
-| live region           | conditional | hidden `<div>`                                                                 | adapter-owned | adapter-owned attrs                         | reorder announcement surface           |
+| Core part / structure | Required?   | Adapter rendering target                                                      | Ownership     | Attr source                               | Notes                                                                                                                                                                |
+| --------------------- | ----------- | ----------------------------------------------------------------------------- | ------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`                | required    | `<div>`                                                                       | adapter-owned | `api.root_attrs()`                        | owns context and applies panel body presence                                                                                                                         |
+| `List`                | required    | `<div>`                                                                       | adapter-owned | `api.list_attrs()`                        | `role="tablist"`                                                                                                                                                     |
+| `Panels`              | required    | `<div>`                                                                       | adapter-owned | `api.panels_attrs()`                      | panel collection wrapper                                                                                                                                             |
+| `TabShell`            | repeated    | presentational `<div>` wrapping one tab trigger and optional close trigger    | adapter-owned | `api.tab_shell_attrs(key, focus_visible)` | mirrors selected, disabled, closable, and focus-visible state so the whole row can be styled directly; owns browser `draggable` and pointer drag/drop handlers       |
+| `Trigger`             | repeated    | `<a>` for link tabs; otherwise a role-backed focus target such as `<div>`     | adapter-owned | `api.tab_attrs(key, focus_visible)`       | public trigger part; roving focus target; owns tab role, selection, focus, and keyboard handlers                                                                     |
+| `Indicator`           | optional    | internal `<span>` rendered by `List`                                          | adapter-owned | `api.tab_indicator_attrs()`               | measurement-driven visual node; styled through stable data attrs or higher-level styled templates instead of a standalone public component                           |
+| `Panel`               | repeated    | `<div>`                                                                       | adapter-owned | `api.panel_attrs(key, tab_id)`            | `role="tabpanel"`                                                                                                                                                    |
+| `CloseTrigger`        | conditional | non-roving pointer affordance sibling after the tab trigger inside `TabShell` | adapter-owned | `api.close_trigger_attrs(label)`          | closable tabs only; renders `Tab::close_trigger` content when supplied, otherwise a small SVG glyph so unstyled primitives remain visible without CSS pseudo-content |
+| live region           | conditional | hidden `<div>`                                                                | adapter-owned | adapter-owned attrs                       | reorder announcement surface                                                                                                                                         |
+
+## 4.1 Customization Boundary
+
+The adapter crate exposes unstyled primitives only. Ready-made visual
+Tabs live in `ars-leptos-components/src/navigation/tabs/` as
+category-first CSS and Tailwind source-template modules. Those styled
+templates compose the adapter primitives and may expose the ergonomic
+closed-anatomy props, but they are not adapter primitives.
+
+`Trigger` and `CloseTrigger` are public child parts, but they are behavior
+parts rather than raw DOM shortcuts. They own roving focus, ARIA
+relationships, DOM refs, keyboard dispatch, close semantics, disabled guards,
+and localized labels. `TabShell` owns browser `draggable`, drop target, and
+drag-image wiring so the whole row, including the close affordance area, is
+the drag surface. Consumers customize row layout with `List<K>::tab_row` and
+`TabShell`, customize close glyph content with `Tab::close_trigger(view)`, and
+style each node directly:
+
+```rust,no_check
+view! {
+    <tabs::Root
+        default_value=SettingsTab::Home
+        tabs=[
+            tabs::Tab::new(SettingsTab::Home, home_panel),
+            tabs::Tab::new(SettingsTab::Settings, settings_panel)
+                .closable(true)
+                .close_trigger(|| view! { <span aria-hidden="true">"x"</span> }),
+        ]
+    >
+        <tabs::List<SettingsTab>
+            class="relative"
+            tab_row=|item| view! {
+                <tabs::TabShell item=item class="inline-flex items-center gap-1">
+                    <tabs::Trigger<SettingsTab> class="px-3 py-2" />
+                    <tabs::CloseTrigger<SettingsTab> class="grid size-5 place-items-center rounded-full hover:bg-red-100" />
+                </tabs::TabShell>
+            }
+        />
+        <tabs::Panels<SettingsTab> />
+        <tabs::LiveRegion />
+    </tabs::Root>
+}
+```
+
+Tailwind users who want a ready-made closed anatomy should use the
+`ars-leptos-components::navigation::tabs::tailwind` source template and edit
+its inline classes. Low-level adapter users should attach Tailwind classes to
+public parts such as `List`, `Root`, `TabShell`, `Trigger`, and
+`CloseTrigger`; they should not
+rebuild the close trigger, trigger, indicator, selection, or keyboard policy in
+application code.
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node      | Core attrs                                                       | Adapter-owned attrs                                                        | Consumer attrs                         | Merge order                             | Ownership notes                         |
-| ---------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------- | --------------------------------------- |
-| `List` and `Tab` | tablist roles, selection, controls, tabindex, and disabled attrs | roving keydown handlers, measurement hooks, and route-aware host selection | decoration attrs and trailing handlers | ARIA, tabindex, and selection attrs win | tabs remain adapter-owned focus targets |
-| `Panel`          | labelledby, hidden, and current selection attrs                  | lazy-mount or unmount presence policy                                      | decoration attrs                       | linkage and visibility attrs win        | panel ownership stays adapter-side      |
-| `Indicator`      | decorative attrs                                                 | measurement-derived CSS custom properties                                  | none                                   | adapter measurement wins                | visual only                             |
+| Target node          | Core attrs                                                       | Adapter-owned attrs                                                        | Consumer attrs                         | Merge order                             | Ownership notes                         |
+| -------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------- | --------------------------------------- |
+| `List` and `Trigger` | tablist roles, selection, controls, tabindex, and disabled attrs | roving keydown handlers, measurement hooks, and route-aware host selection | decoration attrs and trailing handlers | ARIA, tabindex, and selection attrs win | tabs remain adapter-owned focus targets |
+| `Panels`             | panel collection anatomy attrs                                   | none                                                                       | decoration attrs                       | core attrs win                          | wrapper is a public core part           |
+| `Panel`              | labelledby, hidden, and current selection attrs                  | renderer application of the core lazy/unmount predicate                    | decoration attrs                       | linkage and visibility attrs win        | panel ownership stays adapter-side      |
+| `Indicator`          | decorative attrs                                                 | measurement-derived CSS custom properties                                  | none                                   | adapter measurement wins                | internal visual node                    |
 
 ## 6. Composition / Context Contract
 
-`Tabs` is a single compound component that owns the machine internally
-and renders the full anatomy in one pass. There is no consumer-facing
-root context to publish: per-tab data flows in through the
-`tabs: TabsSource<K>` prop, and the agnostic core's `ConnectApi` is
-reached via the adapter's render path. A future compound API
-(separate `<TabsRoot>`, `<TabsList>`, `<Tab>`, `<TabsPanel>` parts)
-could be layered on top without breaking this single-component
-surface.
+`Root` publishes typed adapter context to child primitives. `List` and
+`Panels` are collection-driven readers of the root `TabsSource<K>`;
+`TabShell`, `Trigger`, `CloseTrigger`, and `Panel` receive a `TabRenderItem<K>` from those
+collection renderers. Consumers do not manually mirror key order in
+children. Public parts fail fast when rendered outside `Root`. The
+indicator node is private because calling it correctly requires
+adapter-owned measurement attrs and style state. CSS variants customize it
+through `data-ars-part="tab-indicator"` selectors; Tailwind variants put the
+equivalent arbitrary descendant variants on the `List` class string so copied
+source remains self-contained.
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                                                           | Mode       | Sync trigger              | Machine event / update path          | Visible effect                                    | Notes                                            |
-| ---------------------------------------------------------------------- | ---------- | ------------------------- | ------------------------------------ | ------------------------------------------------- | ------------------------------------------------ |
-| `value`                                                                | controlled | signal change after mount | `SelectTab` or controlled sync event | updates selected tab, indicator, and active panel | no controlled/uncontrolled switching after mount |
-| `orientation`, `activation_mode`, `dir`, `loop_focus`, `disabled_keys` | controlled | rerender with new props   | core prop rebuild                    | updates roving navigation and activation guards   | registry identity remains stable                 |
-| `lazy_mount`, `unmount_on_exit`                                        | controlled | rerender with new props   | adapter presence policy              | changes panel mount lifecycle                     | not machine state                                |
-| `reorderable`                                                          | controlled | rerender with new props   | adapter behavior gate                | enables reorder announcements and controls        | no hidden reorder mode                           |
+| Adapter prop                                                           | Mode       | Sync trigger              | Machine event / update path                | Visible effect                                    | Notes                                            |
+| ---------------------------------------------------------------------- | ---------- | ------------------------- | ------------------------------------------ | ------------------------------------------------- | ------------------------------------------------ |
+| `value`                                                                | controlled | signal change after mount | `SelectTab` or controlled sync event       | updates selected tab, indicator, and active panel | no controlled/uncontrolled switching after mount |
+| `orientation`, `activation_mode`, `dir`, `loop_focus`, `disabled_keys` | controlled | rerender with new props   | core prop rebuild                          | updates roving navigation and activation guards   | registry identity remains stable                 |
+| `lazy_mount`, `unmount_on_exit`                                        | controlled | rerender with new props   | core presence predicate applied by adapter | changes panel mount lifecycle                     | not machine state                                |
+| `reorderable`                                                          | controlled | rerender with new props   | adapter behavior gate                      | enables reorder announcements and controls        | no hidden reorder mode                           |
 
 | UI event                 | Preconditions           | Machine event / callback path                                                                | Ordering notes                                                            | Notes                                        |
 | ------------------------ | ----------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------- |
@@ -203,7 +354,7 @@ surface.
 ## 10. State Machine Boundary Rules
 
 - Selected tab, focused tab, disabled tab guards, and activation mode remain core-owned.
-- Ordered registration, indicator measurement, panel presence policy, and reorder announcements remain adapter-owned.
+- Ordered registration, indicator measurement, renderer application of the core panel-presence predicate, and reorder announcements remain adapter-owned.
 - The adapter must not keep an unsynchronized selected-tab mirror.
 
 ## 11. Callback Payload Contract
@@ -264,7 +415,7 @@ Tab identity is the tab key. Registration order, panel linkage, and reorder oper
    keyed `<For>`; per-tab content comes from `Tab`.
 5. Watch the `focused_tab` `Memo` and call
    `PlatformEffects::focus_element_by_id` when it changes.
-6. Add closable tabs (close button + Delete/Backspace), reorder
+6. Add closable tabs (close affordance + Delete/Backspace), reorder
    behavior (Ctrl+Arrow + drag/drop), and live announcements via
    `Api::reorder_announcement`.
 
@@ -279,6 +430,9 @@ Tab identity is the tab key. Registration order, panel linkage, and reorder oper
 - Consumers may assume exactly one tab is selected at a time.
 - Consumers may assume panel linkage remains stable across reorder operations.
 - Consumers must not assume inactive panels stay mounted unless the documented presence props require it.
+- Consumers may import the `tabs` module from `ars_leptos::prelude::*`, then
+  access the full adapter and agnostic Tabs surface through namespaced paths
+  such as `tabs::Root`, `tabs::TabRenderItem`, and `tabs::TabsSource`.
 
 ## 20. Platform Support Matrix
 
@@ -324,15 +478,19 @@ enum SettingsTab {
 }
 
 view! {
-    <Tabs
+    <tabs::Root
         default_value=SettingsTab::Home
         tabs=[
-            Tab::new(SettingsTab::Home, home_panel),
-            Tab::new(SettingsTab::Settings, settings_panel)
+            tabs::Tab::new(SettingsTab::Home, home_panel),
+            tabs::Tab::new(SettingsTab::Settings, settings_panel)
                 .closable(true),
         ]
         reorderable=true
-    />
+    >
+        <tabs::List<SettingsTab> />
+        <tabs::Panels<SettingsTab> />
+        <tabs::LiveRegion />
+    </tabs::Root>
 }
 ```
 
@@ -342,8 +500,9 @@ shared `TabMeta<K>` snapshot drives `Event::SetTabs` through
 `registrations_from_meta`; direct disabled aggregation from the live
 field drives `Event::SyncProps`; drag-and-drop reorder handlers use
 `drag_reorder_plan` to build the typed `ReorderEvent<K>` and
-announcement data; owned inline tabs mutate their internal store for
-close and reorder interactions; controlled `value` drives
+announcement data and clone the public `TabShell` as the native drag
+image; owned inline tabs mutate their internal store for close and
+reorder interactions; controlled `value` drives
 `Event::SyncControlledValue`.
 `Effect::FocusFocusedTab` is dispatched by watching `ctx.focused_tab`
 and calling `PlatformEffects::focus_element_by_id`.
@@ -387,7 +546,7 @@ and calling `PlatformEffects::focus_element_by_id`.
 - runtime mutation: push a new tab into the store, verify it joins the
   registered list and selection invariant survives.
 - runtime mutation: flip a tab's `closable` flag in the store, verify
-  the close button appears / disappears without remounting siblings.
+  the close affordance appears / disappears without remounting siblings.
 - runtime mutation: flip a tab's `disabled` flag in the store, verify
   `aria-disabled` updates and the tab is skipped during arrow navigation
   via `Event::SyncProps`.

@@ -454,9 +454,9 @@ h2 {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 5px;
     margin: 0 0 20px;
-    padding: 6px;
+    padding: 5px;
     position: relative;
 }
 
@@ -472,8 +472,8 @@ h2 {
     font: inherit;
     font-weight: 600;
     gap: 8px;
-    min-height: 38px;
-    padding: 9px 13px;
+    min-height: 34px;
+    padding: 7px 12px;
     position: relative;
     transition:
         background-color 140ms ease,
@@ -487,41 +487,115 @@ h2 {
     align-items: center;
     display: inline-flex;
     gap: 6px;
+    position: relative;
+    border-radius: 8px;
+    transition:
+        background-color 140ms ease,
+        box-shadow 140ms ease;
+    z-index: 1;
 }
 
-[data-ars-scope="tabs"][data-ars-part="tab"]:hover {
-    background: rgba(255, 255, 255, 0.7);
+[data-ars-part="tab-shell"]:has(
+        [data-ars-scope="tabs"][data-ars-part="tab"][data-ars-focus-visible]
+    ):not([data-ars-dragging]) {
+    outline: 2px solid #1d4ed8;
+    outline-offset: 2px;
+}
+
+[data-ars-part="tab-shell"]:has([data-ars-part="tab-close-trigger"]) {
+    gap: 0;
+    padding-right: 8px;
+}
+
+[data-ars-part="tab-shell"]:has([data-ars-part="tab-close-trigger"])
+    [data-ars-scope="tabs"][data-ars-part="tab"] {
+    padding-right: 8px;
+}
+
+[data-ars-part="tab-shell"]:has(
+        [data-ars-scope="tabs"][data-ars-part="tab"]:not(
+                [aria-disabled="true"]
+            ):not([data-ars-selected])
+    ):hover {
+    background: white;
+    box-shadow:
+        0 1px 2px rgba(15, 23, 42, 0.08),
+        0 0 0 1px rgba(148, 163, 184, 0.5);
     color: #111827;
 }
 
-[data-ars-scope="tabs"][data-ars-part="tab"][data-ars-selected] {
-    background: #1d4ed8;
-    box-shadow: 0 8px 18px rgba(29, 78, 216, 0.24);
-    color: white;
+[data-ars-part="tab-shell"]:has(
+        [data-ars-scope="tabs"][data-ars-part="tab"]:not(
+                [aria-disabled="true"]
+            ):not([data-ars-selected])
+    ):hover
+    [data-ars-part="tab-close-trigger"] {
+    background: rgba(15, 23, 42, 0.15);
+    color: #334155;
 }
 
-[data-ars-scope="tabs"][data-ars-part="tab"][data-ars-selected]:hover {
+[data-ars-part="tab-shell"]:has(
+        [data-ars-scope="tabs"][data-ars-part="tab"]:not(
+                [aria-disabled="true"]
+            ):not([data-ars-selected])
+    ):hover
+    [data-ars-part="tab-close-trigger"]:hover {
+    background: #ffe4e6;
+    box-shadow: 0 0 0 1px #fecdd3;
+    color: #be123c;
+}
+
+[data-ars-part="tab-shell"]:has(
+    [data-ars-scope="tabs"][data-ars-part="tab"][data-ars-selected]
+) {
+    background: #1d4ed8;
+    box-shadow: 0 8px 18px rgba(29, 78, 216, 0.24);
+}
+
+[data-ars-part="tab-shell"]:has(
+        [data-ars-scope="tabs"][data-ars-part="tab"][data-ars-selected]
+    ):hover {
     background: #1e40af;
     color: white;
 }
 
-[data-ars-scope="tabs"][data-ars-part="tab"][draggable="true"] {
-    cursor: grab;
+[data-ars-scope="tabs"][data-ars-part="tab"]:hover {
+    background: transparent;
+    color: #111827;
 }
 
-[data-ars-scope="tabs"][data-ars-part="tab"][draggable="true"]:active {
+[data-ars-scope="tabs"][data-ars-part="tab"][data-ars-selected] {
+    background: transparent;
+    box-shadow: none;
+    color: white;
+}
+
+[data-ars-scope="tabs"][data-ars-part="tab"][data-ars-selected]:hover {
+    background: transparent;
+    color: white;
+}
+
+[data-ars-scope="tabs"][data-ars-part="tab"] {
+    outline: none;
+}
+
+[data-ars-part="tab-shell"][draggable="true"] {
+    cursor: pointer;
+}
+
+[data-ars-part="tab-shell"][data-ars-dragging],
+[data-ars-part="tab-shell"][draggable="true"]:active {
     cursor: grabbing;
     transform: translateY(1px);
+}
+
+[data-ars-part="tab-shell"][data-ars-disabled] {
+    cursor: not-allowed;
 }
 
 [data-ars-scope="tabs"][data-ars-part="tab"][aria-disabled="true"] {
     cursor: not-allowed;
     opacity: 0.48;
-}
-
-[data-ars-scope="tabs"][data-ars-part="tab"][data-ars-focus-visible] {
-    outline: 2px solid #1d4ed8;
-    outline-offset: 2px;
 }
 
 [data-ars-scope="tabs"][data-ars-part="tab-close-trigger"] {
@@ -555,31 +629,18 @@ h2 {
     color: white;
 }
 
-[data-ars-scope="tabs"][data-ars-part="tab"][data-ars-selected]
-    [data-ars-part="tab-close-trigger"] {
-    background: rgba(255, 255, 255, 0.18);
-    color: white;
-}
-
 [data-ars-part="tab-shell"]:has(
         [data-ars-scope="tabs"][data-ars-part="tab"][data-ars-selected]
     )
     [data-ars-part="tab-close-trigger"]:hover {
-    background: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.35);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
     color: white;
 }
 
-[data-ars-scope="tabs"][data-ars-part="tab"][data-ars-selected]
-    [data-ars-part="tab-close-trigger"]:hover {
-    background: rgba(255, 255, 255, 0.28);
-    color: white;
-}
-
-[data-ars-scope="tabs"][data-ars-part="tab-close-trigger"]::before {
-    content: "×";
-    font-size: 15px;
-    font-weight: 700;
-    line-height: 1;
+[data-ars-part="tab-shell"][data-ars-dragging],
+[data-ars-part="tab-shell"][data-ars-dragging] * {
+    cursor: grabbing;
 }
 
 [data-ars-scope="tabs"][data-ars-part="tab-indicator"] {

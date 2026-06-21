@@ -6,7 +6,7 @@
 
 use ars_dioxus::{
     I18nRegistries, MessageFn, MessagesRegistry,
-    navigation::tabs::{self, Tab, Tabs},
+    navigation::tabs,
     prelude::{Locale, TabKey, Translate, t},
 };
 use dioxus::prelude::*;
@@ -87,27 +87,30 @@ pub(crate) fn register_messages(registries: &mut I18nRegistries) {
 pub(crate) fn NavigationPanel() -> Element {
     rsx! {
         section { class: "showcase-panel wide",
-            Tabs {
+            tabs::Root {
                 default_value: NavigationTab::Overview,
                 tabs: [
-                    Tab::new(NavigationTab::Overview, rsx! {
+                    tabs::Tab::new(NavigationTab::Overview, rsx! {
                         p { "Tabs fixture overview." }
                     }),
-                    Tab::new(NavigationTab::Keyboard, rsx! {
+                    tabs::Tab::new(NavigationTab::Keyboard, rsx! {
                         ul {
                             li { {t(NavigationText::KeyboardArrowKeys)} }
                             li { {t(NavigationText::KeyboardHomeEnd)} }
                             li { {t(NavigationText::KeyboardReorder)} }
                         }
                     }).closable(true),
-                    Tab::new(NavigationTab::Closable, rsx! {
+                    tabs::Tab::new(NavigationTab::Closable, rsx! {
                         p { {t(NavigationText::ClosablePanel)} }
                     }).closable(true),
-                    Tab::new(NavigationTab::Disabled, rsx! {
+                    tabs::Tab::new(NavigationTab::Disabled, rsx! {
                         p { {t(NavigationText::DisabledPanel)} }
                     }).disabled(true),
                 ],
                 reorderable: true,
+                tabs::List::<NavigationTab> {}
+                tabs::Panels::<NavigationTab> {}
+                tabs::LiveRegion {}
             }
         }
     }

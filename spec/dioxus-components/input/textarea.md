@@ -195,10 +195,10 @@ Dioxus should keep the native textarea in a mounted-node path suitable for measu
 let machine = use_machine::<textarea::Machine>(props);
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        label { ..machine.derive(|api| api.label_attrs()).read().clone(), {children} }
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
+        label { ..machine.derive(|api| api.label_attrs()).cloned(), {children} }
         textarea {
-            ..machine.derive(|api| api.textarea_attrs()).read().clone(),
+            ..machine.derive(|api| api.textarea_attrs()).cloned(),
             oninput: move |ev| send_input(ev, &machine),
         }
     }

@@ -300,7 +300,7 @@ pub fn Root(props: FieldSketchProps) -> Element {
 
     rsx! {
         div {
-            ..root_attrs.read().clone(),
+            ..root_attrs.cloned(),
             {props.children}
         }
     }
@@ -315,7 +315,7 @@ pub struct LabelSketchProps {
 pub fn Label(props: LabelSketchProps) -> Element {
     let machine = try_use_context::<Context>().expect("field::Label requires field::Root");
     let attrs = machine.derive(|api| api.label_attrs());
-    rsx! { label { ..attrs.read().clone(), {props.children} } }
+    rsx! { label { ..attrs.cloned(), {props.children} } }
 }
 ```
 

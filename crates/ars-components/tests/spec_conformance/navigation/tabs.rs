@@ -7,7 +7,7 @@ use crate::helper::assert_anatomy;
 fn tabs_anatomy_matches_spec() {
     // Spec references:
     // - `spec/components/navigation/tabs.md` §2 base anatomy table
-    //   declares Root / List / Tab / Indicator / Panel.
+    //   declares Root / List / Panels / TabShell / Tab / Indicator / Panel.
     // - §5.4 anatomy addition declares the Closable variant's
     //   `tab-close-trigger` part.
     //
@@ -20,6 +20,13 @@ fn tabs_anatomy_matches_spec() {
         &[
             (tabs::Part::Root, "root"),
             (tabs::Part::List, "list"),
+            (tabs::Part::Panels, "panels"),
+            (
+                tabs::Part::TabShell {
+                    tab_key: Key::default(),
+                },
+                "tab-shell",
+            ),
             (
                 tabs::Part::Tab {
                     tab_key: Key::default(),

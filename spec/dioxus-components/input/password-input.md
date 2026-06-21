@@ -189,11 +189,11 @@ Dioxus should use the same input and composition wiring as `TextField`, keep the
 let machine = use_machine::<password_input::Machine>(props);
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        label { ..machine.derive(|api| api.label_attrs()).read().clone(), {children} }
-        input { ..machine.derive(|api| api.input_attrs()).read().clone() }
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
+        label { ..machine.derive(|api| api.label_attrs()).cloned(), {children} }
+        input { ..machine.derive(|api| api.input_attrs()).cloned() }
         button {
-            ..machine.derive(|api| api.toggle_attrs()).read().clone(),
+            ..machine.derive(|api| api.toggle_attrs()).cloned(),
             onclick: move |_| machine.send.call(password_input::Event::ToggleVisibility),
         }
     }

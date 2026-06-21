@@ -21,16 +21,14 @@ use std::{
 };
 
 use ars_collections::Key;
-use ars_components::navigation::tabs;
+use ars_components::navigation::tabs as core_tabs;
 use ars_core::{
     Direction, HtmlAttr, I18nRegistries, MessageFn, MessagesRegistry, NullPlatformEffects,
     Orientation, PlatformEffects, Rect, SafeUrl, TimerHandle,
 };
 use ars_dioxus::{
     ArsProvider, DioxusPlatform, DragData, FilePickerOptions, PlatformDragEvent, TabKey, Translate,
-    default_dioxus_platform,
-    dioxus_stores::use_store,
-    navigation::tabs::{ActivationMode, ReadStore, ReorderEvent, Tab, TabLabel, Tabs, TabsSource},
+    default_dioxus_platform, dioxus_stores::use_store, navigation::tabs,
 };
 use ars_forms::field::FileRef;
 use ars_i18n::{ResolvedDirection, locales};
@@ -44,8 +42,37 @@ use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 wasm_bindgen_test_configure!(run_in_browser);
 
-type TestTab = Tab<&'static str>;
-type TestReorderEvent = ReorderEvent<&'static str>;
+type TestTab = tabs::Tab<&'static str>;
+type TestReorderEvent = tabs::ReorderEvent<&'static str>;
+type StaticStr = &'static str;
+
+#[component]
+fn Tabs<K: TabKey>(props: tabs::RootProps<K>) -> Element {
+    rsx! {
+        tabs::Root {
+            value: props.value,
+            default_value: props.default_value,
+            tabs: props.tabs,
+            orientation: props.orientation,
+            activation_mode: props.activation_mode,
+            dir: props.dir,
+            loop_focus: props.loop_focus,
+            disallow_empty_selection: props.disallow_empty_selection,
+            lazy_mount: props.lazy_mount,
+            unmount_on_exit: props.unmount_on_exit,
+            disabled_keys: props.disabled_keys,
+            reorderable: props.reorderable,
+            on_value_change: props.on_value_change,
+            on_close_tab: props.on_close_tab,
+            on_reorder: props.on_reorder,
+            attrs: props.attrs,
+            tabs::List::<K> {}
+            tabs::Panels::<K> {}
+            tabs::LiveRegion {}
+            {props.children}
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, TabKey, Translate)]
 #[tab_key(ordinal)]
@@ -60,11 +87,11 @@ enum LocalizedTab {
 
 #[wasm_bindgen_test]
 fn web_tab_public_builders_and_debug_paths_are_covered() {
-    let label = TabLabel::static_text("Standalone");
+    let label = tabs::TabLabel::static_text("Standalone");
 
     assert_eq!(label.resolve(), "Standalone");
 
-    let tab = Tab::new_static("standalone", "Standalone", rsx! { "Panel" })
+    let tab = tabs::Tab::new_static("standalone", "Standalone", rsx! { "Panel" })
         .trigger(rsx! {
             strong { "Standalone trigger" }
         })
@@ -87,14 +114,19 @@ fn web_tab_public_builders_and_debug_paths_are_covered() {
     assert!(tab_debug.contains("standalone"));
     assert!(tab_debug.contains("Standalone"));
 
-    let from_vec = TabsSource::from(vec![Tab::new_static("first", "First", rsx! { "Panel" })]);
+    let from_vec = tabs::TabsSource::from(vec![tabs::Tab::new_static(
+        "first",
+        "First",
+        rsx! { "Panel" },
+    )]);
 
-    assert!(matches!(from_vec, TabsSource::Owned(_)));
+    assert!(matches!(from_vec, tabs::TabsSource::Owned(_)));
     assert!(format!("{from_vec:?}").contains("TabsSource::Owned"));
 
-    let from_array = TabsSource::from([Tab::new_static("second", "Second", rsx! { "Panel" })]);
+    let from_array =
+        tabs::TabsSource::from([tabs::Tab::new_static("second", "Second", rsx! { "Panel" })]);
 
-    assert!(matches!(from_array, TabsSource::Owned(_)));
+    assert!(matches!(from_array, tabs::TabsSource::Owned(_)));
 }
 
 struct MountedFocusProbePlatform {
@@ -196,19 +228,19 @@ impl PartialEq for MountedFocusProbeProps {
 
 fn three_tabs() -> Vec<TestTab> {
     vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "first",
             "First",
             rsx! { "First" },
             rsx! { p { "Panel one" } },
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "second",
             "Second",
             rsx! { "Second" },
             rsx! { p { "Panel two" } },
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "third",
             "Third",
             rsx! { "Third" },
@@ -381,6 +413,127 @@ fn dispatch_drag_event(target: &web_sys::HtmlElement, kind: &str) -> web_sys::Dr
     event
 }
 
+fn dispatch_drag_event_with_data_transfer(
+    target: &web_sys::HtmlElement,
+    kind: &str,
+) -> web_sys::DragEvent {
+    let init = web_sys::DragEventInit::new();
+    let data_transfer = web_sys::DataTransfer::new().expect("data transfer should construct");
+
+    init.set_bubbles(true);
+    init.set_cancelable(true);
+    init.set_data_transfer(Some(&data_transfer));
+
+    let event = web_sys::DragEvent::new_with_event_init_dict(kind, &init)
+        .expect("drag event should construct");
+
+    target
+        .dispatch_event(&event)
+        .expect("drag event should dispatch");
+
+    event
+}
+
+struct DragImageCall {
+    part: Option<String>,
+    preview: Option<String>,
+    has_close_trigger: bool,
+    has_focus_visible: bool,
+    has_selected_state: bool,
+    connected: bool,
+    x: i32,
+    y: i32,
+}
+
+struct DragImageSpy {
+    calls: Rc<RefCell<Vec<DragImageCall>>>,
+    prototype: wasm_bindgen::JsValue,
+    original: wasm_bindgen::JsValue,
+    _closure: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Element, i32, i32)>,
+}
+
+impl Drop for DragImageSpy {
+    fn drop(&mut self) {
+        drop(js_sys::Reflect::set(
+            &self.prototype,
+            &wasm_bindgen::JsValue::from_str("setDragImage"),
+            &self.original,
+        ));
+    }
+}
+
+fn install_drag_image_spy() -> DragImageSpy {
+    let constructor = js_sys::Reflect::get(
+        &js_sys::global(),
+        &wasm_bindgen::JsValue::from_str("DataTransfer"),
+    )
+    .expect("DataTransfer constructor should be available");
+
+    let prototype =
+        js_sys::Reflect::get(&constructor, &wasm_bindgen::JsValue::from_str("prototype"))
+            .expect("DataTransfer prototype should be available");
+
+    let original =
+        js_sys::Reflect::get(&prototype, &wasm_bindgen::JsValue::from_str("setDragImage"))
+            .expect("setDragImage should be available");
+
+    let calls = Rc::new(RefCell::new(Vec::<DragImageCall>::new()));
+    let closure_calls = Rc::clone(&calls);
+    let closure = wasm_bindgen::closure::Closure::wrap(Box::new(
+        move |image: web_sys::Element, x: i32, y: i32| {
+            let part = image.get_attribute("data-ars-part");
+
+            let preview = image.get_attribute("data-ars-drag-image");
+
+            let has_close_trigger = image
+                .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+                .expect("query should succeed")
+                .is_some();
+
+            let has_focus_visible = image.has_attribute("data-ars-focus-visible")
+                || image
+                    .query_selector("[data-ars-focus-visible]")
+                    .expect("query should succeed")
+                    .is_some();
+
+            let has_selected_state = image.has_attribute("data-ars-selected")
+                || image.has_attribute("aria-selected")
+                || image
+                    .query_selector("[data-ars-selected], [aria-selected]")
+                    .expect("query should succeed")
+                    .is_some();
+
+            let connected = image.is_connected();
+
+            closure_calls.borrow_mut().push(DragImageCall {
+                part,
+                preview,
+                has_close_trigger,
+                has_focus_visible,
+                has_selected_state,
+                connected,
+                x,
+                y,
+            });
+        },
+    )
+        as Box<dyn FnMut(web_sys::Element, i32, i32)>);
+
+    js_sys::Reflect::set(
+        &prototype,
+        &wasm_bindgen::JsValue::from_str("setDragImage"),
+        closure.as_ref(),
+    )
+    .expect("setDragImage spy should install");
+
+    DragImageSpy {
+        calls,
+        prototype,
+        original,
+        _closure: closure,
+    }
+}
+
 fn first_with_data_part(parent: &web_sys::HtmlElement, part: &str) -> web_sys::HtmlElement {
     parent
         .query_selector(&format!("[data-ars-part='{part}']"))
@@ -429,6 +582,15 @@ fn tab_at(parent: &web_sys::HtmlElement, index: u32) -> web_sys::HtmlElement {
         .unwrap_or_else(|| panic!("tab at index {index} should exist"))
         .dyn_into::<web_sys::HtmlElement>()
         .expect("tab is HtmlElement")
+}
+
+fn tab_shell_at(parent: &web_sys::HtmlElement, index: u32) -> web_sys::HtmlElement {
+    tab_at(parent, index)
+        .closest(r#"[data-ars-part="tab-shell"]"#)
+        .expect("query should succeed")
+        .unwrap_or_else(|| panic!("tab shell at index {index} should exist"))
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("tab shell is HtmlElement")
 }
 
 fn active_element_text() -> String {
@@ -586,7 +748,7 @@ fn controlled_probe(props: ControlledProbeProps) -> Element {
         Tabs {
             value: Some("first"),
             default_value: "first",
-            tabs: ReadStore::from(tabs),
+            tabs,
             on_value_change: move |key| selected.borrow_mut().push(key),
         }
     }
@@ -604,7 +766,7 @@ fn controlled_keyboard_probe(props: ControlledProbeProps) -> Element {
         Tabs {
             value: Some("first"),
             default_value: "first",
-            tabs: ReadStore::from(tabs),
+            tabs,
             on_value_change: move |key| selected.borrow_mut().push(key),
         }
     }
@@ -618,7 +780,7 @@ fn store_mutation_probe() -> Element {
     let mut tabs = use_store(three_tabs);
 
     let push_tab = move |_| {
-        tabs.write().push(Tab::new_with_label(
+        tabs.write().push(tabs::Tab::new_with_label(
             "fourth",
             "Fourth",
             rsx! { "Fourth" },
@@ -627,11 +789,13 @@ fn store_mutation_probe() -> Element {
             },
         ));
     };
+
     let pop_tab = move |_| {
         tabs.write().pop();
     };
+
     let make_closable = move |_| {
-        tabs.write()[1] = Tab::new_with_label(
+        tabs.write()[1] = tabs::Tab::new_with_label(
             "second",
             "Second",
             rsx! { "Second" },
@@ -641,8 +805,9 @@ fn store_mutation_probe() -> Element {
         )
         .closable(true);
     };
+
     let make_disabled = move |_| {
-        tabs.write()[1] = Tab::new_with_label(
+        tabs.write()[1] = tabs::Tab::new_with_label(
             "second",
             "Second",
             rsx! { "Second" },
@@ -658,7 +823,42 @@ fn store_mutation_probe() -> Element {
         button { id: "pop-tab", onclick: pop_tab, "pop" }
         button { id: "make-closable", onclick: make_closable, "closable" }
         button { id: "make-disabled", onclick: make_disabled, "disabled" }
-        Tabs { default_value: "first", tabs: ReadStore::from(tabs) }
+        Tabs { default_value: "first", tabs }
+    }
+}
+
+#[expect(
+    unused_qualifications,
+    reason = "Dioxus rsx event attributes in this probe expand in a way the lint currently flags"
+)]
+fn custom_close_trigger_hook_order_probe() -> Element {
+    let mut tabs = use_store(three_tabs);
+
+    let make_closable = move |_| {
+        tabs.write()[1] = tabs::Tab::new_with_label(
+            "second",
+            "Second",
+            rsx! { "Second" },
+            rsx! {
+                p { "Panel two" }
+            },
+        )
+        .closable(true);
+    };
+
+    rsx! {
+        button { id: "make-custom-close-trigger-closable", onclick: make_closable, "closable" }
+        Tabs { default_value: "first", tabs,
+            tabs::List::<StaticStr> {
+                tab_row: |item: tabs::TabRenderItem<StaticStr>| rsx! {
+                    tabs::TabShell { item,
+                        tabs::Trigger::<StaticStr> {}
+                        tabs::CloseTrigger::<StaticStr> {}
+                    }
+                },
+            }
+            tabs::Panels::<StaticStr> {}
+        }
     }
 }
 
@@ -679,7 +879,7 @@ fn close_mutates_store_probe() -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(tabs),
+            tabs,
             on_close_tab: move |key: &'static str| {
                 tabs.write().retain(|tab| tab.key != key);
             },
@@ -723,7 +923,7 @@ fn CloseValueChangeProbe(props: CloseValueChangeProbeProps) -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(tabs),
+            tabs,
             on_close_tab: move |key: &'static str| {
                 tabs.write().retain(|tab| tab.key != key);
             },
@@ -758,7 +958,7 @@ impl PartialEq for SingleCloseProbeProps {
 fn single_close_disallow_empty_probe(props: SingleCloseProbeProps) -> Element {
     let mut tabs = use_store(|| {
         vec![
-            Tab::new_with_label("only", "Only", rsx! { "Only" }, rsx! { p { "Only panel" } })
+            tabs::Tab::new_with_label("only", "Only", rsx! { "Only" }, rsx! { p { "Only panel" } })
                 .closable(true),
         ]
     });
@@ -767,7 +967,7 @@ fn single_close_disallow_empty_probe(props: SingleCloseProbeProps) -> Element {
     rsx! {
         Tabs {
             default_value: "only",
-            tabs: ReadStore::from(tabs),
+            tabs,
             disallow_empty_selection: true,
             on_close_tab: Callback::new(move |key| {
                 closed
@@ -802,7 +1002,7 @@ fn drag_reorder_probe(props: DragReorderProbeProps) -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(tabs),
+            tabs,
             reorderable: true,
             on_reorder: Callback::new(move |event: TestReorderEvent| {
                 reordered
@@ -818,6 +1018,122 @@ fn drag_reorder_probe(props: DragReorderProbeProps) -> Element {
     }
 }
 
+fn drag_preview_probe() -> Element {
+    let tabs = use_store(|| {
+        vec![
+            tabs::Tab::new_with_label(
+                "first",
+                "First",
+                rsx! { "First" },
+                rsx! {
+                    p { "Panel one" }
+                },
+            )
+            .closable(true),
+            tabs::Tab::new_with_label(
+                "second",
+                "Second",
+                rsx! { "Second" },
+                rsx! {
+                    p { "Panel two" }
+                },
+            ),
+        ]
+    });
+
+    rsx! {
+        Tabs {
+            default_value: "first",
+            tabs,
+            reorderable: true,
+            on_reorder: Callback::new(|_: TestReorderEvent| true),
+        }
+    }
+}
+
+#[wasm_bindgen_test(async)]
+async fn dragstart_uses_tab_shell_as_drag_preview() {
+    let parent = container();
+
+    let dom = VirtualDom::new(drag_preview_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let spy = install_drag_image_spy();
+
+    let first = tab_at(&parent, 0);
+    first
+        .set_attribute("data-ars-focus-visible", "")
+        .expect("test setup should mark the source tab focus-visible");
+
+    let shell = first
+        .closest(r#"[data-ars-part="tab-shell"]"#)
+        .expect("query should succeed")
+        .expect("tab should live inside a shell");
+
+    dispatch_drag_event_with_data_transfer(&first, "dragstart");
+
+    let calls = spy.calls.borrow();
+
+    assert!(
+        shell.has_attribute("data-ars-dragging"),
+        "live tab shell should expose dragging state during native drag"
+    );
+    assert_eq!(calls.len(), 1, "dragstart should set a custom drag image");
+    assert_eq!(
+        calls[0].part.as_deref(),
+        Some("tab-shell"),
+        "drag preview should use the shell that contains the visual tab"
+    );
+    assert_eq!(
+        calls[0].preview.as_deref(),
+        Some("tab"),
+        "drag preview should be an isolated clone, not the live shell"
+    );
+    assert!(
+        calls[0].has_close_trigger,
+        "drag preview should include the close trigger beside the tab"
+    );
+    assert!(
+        !first.has_attribute("data-ars-focus-visible"),
+        "dragstart should blur the live focused tab so the native drag source does not paint a focus ring"
+    );
+    assert!(
+        first.has_attribute("data-ars-selected"),
+        "drag preview cleanup should not mutate the live selected tab"
+    );
+    assert!(
+        !calls[0].has_focus_visible,
+        "drag preview should not copy keyboard focus-visible state"
+    );
+    assert!(
+        calls[0].has_selected_state,
+        "drag preview should keep selected styling state so the full shell visual is captured"
+    );
+    assert!(
+        calls[0].connected,
+        "drag preview clone should be connected while setDragImage captures it"
+    );
+    assert!(
+        calls[0].x > 0 && calls[0].y > 0,
+        "drag image hotspot should be inside the shell"
+    );
+
+    drop(calls);
+    dispatch_drag_event_with_data_transfer(&first, "dragend");
+    assert!(
+        !shell.has_attribute("data-ars-dragging"),
+        "live tab shell should clear dragging state after native drag"
+    );
+    drop(spy);
+}
+
 #[expect(
     clippy::needless_pass_by_value,
     reason = "Dioxus root props are moved into the component function"
@@ -829,7 +1145,9 @@ fn drag_reorder_probe(props: DragReorderProbeProps) -> Element {
 fn dynamic_reorderable_probe(props: DragReorderProbeProps) -> Element {
     let mut tabs = use_store(three_tabs);
     let mut reorderable = use_signal(|| false);
+
     let reordered = Arc::clone(&props.reordered);
+
     let enable_reorder = move |_| reorderable.set(true);
     let disable_reorder = move |_| reorderable.set(false);
 
@@ -838,16 +1156,20 @@ fn dynamic_reorderable_probe(props: DragReorderProbeProps) -> Element {
         button { id: "disable-reorder", onclick: disable_reorder, "disable" }
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(tabs),
+            tabs,
             reorderable: reorderable(),
             on_reorder: Callback::new(move |event: TestReorderEvent| {
                 reordered
                     .lock()
                     .expect("reorder callback log should not be poisoned")
                     .push(event.clone());
+
                 let mut tabs = tabs.write();
+
                 let tab = tabs.remove(event.old_index);
+
                 tabs.insert(event.new_index, tab);
+
                 true
             }),
         }
@@ -860,7 +1182,9 @@ fn dynamic_reorderable_probe(props: DragReorderProbeProps) -> Element {
 )]
 fn auto_direction_toggle_probe() -> Element {
     let mut dir = use_signal(|| Direction::Ltr);
+
     let set_auto_dir = move |_| dir.set(Direction::Auto);
+
     let platform: Arc<dyn PlatformEffects> = Arc::new(RtlDirectionPlatform);
 
     rsx! {
@@ -868,7 +1192,7 @@ fn auto_direction_toggle_probe() -> Element {
             button { id: "set-auto-dir", onclick: set_auto_dir, "auto" }
             Tabs {
                 default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
+                tabs: use_store(three_tabs),
                 dir: dir(),
             }
         }
@@ -879,9 +1203,35 @@ fn unmounting_panel_probe() -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(use_store(three_tabs)),
+            tabs: use_store(three_tabs),
             lazy_mount: true,
             unmount_on_exit: true,
+        }
+    }
+}
+
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+fn dynamic_lazy_mount_probe() -> Element {
+    let mut lazy_mount = use_signal(|| true);
+    let mut unmount_on_exit = use_signal(|| true);
+
+    rsx! {
+        button {
+            id: "disable-lazy-mount",
+            onclick: move |_| {
+                lazy_mount.set(false);
+                unmount_on_exit.set(false);
+            },
+            "disable"
+        }
+        Tabs {
+            default_value: "first",
+            tabs: use_store(three_tabs),
+            lazy_mount: lazy_mount(),
+            unmount_on_exit: unmount_on_exit(),
         }
     }
 }
@@ -904,14 +1254,14 @@ impl PartialEq for CloseKeyProbeProps {
 fn close_key_probe(props: CloseKeyProbeProps) -> Element {
     let tabs = use_store(|| {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 rsx! { "First" },
                 rsx! { p { "Panel one" } },
             )
             .closable(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 rsx! { "Second" },
@@ -925,7 +1275,7 @@ fn close_key_probe(props: CloseKeyProbeProps) -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(tabs),
+            tabs,
             on_close_tab: Callback::new(move |key| {
                 closed
                     .lock()
@@ -941,14 +1291,14 @@ fn inline_owned_close_probe() -> Element {
         Tabs {
             default_value: "second",
             tabs: [
-                Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
+                tabs::Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
                     p { "Panel one" }
                 }),
-                Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
+                tabs::Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
                     p { "Panel two" }
                 })
                     .closable(true),
-                Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
+                tabs::Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
                     p { "Panel three" }
                 }),
             ],
@@ -958,23 +1308,28 @@ fn inline_owned_close_probe() -> Element {
 
 fn translated_owned_tabs_probe() -> Element {
     let mut locale = use_signal(locales::en_us);
+
     let onclick = move |_| locale.set(locales::br());
+
     let platform: Arc<dyn PlatformEffects> = Arc::new(ars_dom::WebPlatformEffects);
+
     let mut registries = I18nRegistries::new();
 
-    registries.register(MessagesRegistry::new(tabs::Messages::default()).register(
-        "pt-BR",
-        tabs::Messages {
-            close_tab_label: MessageFn::new(|label: &str, _locale: &ars_core::Locale| {
-                format!("Fechar {label}")
-            }),
-            reorder_announce_label: MessageFn::new(
-                |label: &str, position: usize, total: usize, _locale: &ars_core::Locale| {
-                    format!("{label} movida para a posição {position} de {total}")
-                },
-            ),
-        },
-    ));
+    registries.register(
+        MessagesRegistry::new(core_tabs::Messages::default()).register(
+            "pt-BR",
+            core_tabs::Messages {
+                close_tab_label: MessageFn::new(|label: &str, _locale: &ars_core::Locale| {
+                    format!("Fechar {label}")
+                }),
+                reorder_announce_label: MessageFn::new(
+                    |label: &str, position: usize, total: usize, _locale: &ars_core::Locale| {
+                        format!("{label} movida para a posição {position} de {total}")
+                    },
+                ),
+            },
+        ),
+    );
 
     rsx! {
         ArsProvider {
@@ -985,11 +1340,11 @@ fn translated_owned_tabs_probe() -> Element {
             Tabs {
                 default_value: LocalizedTab::Overview,
                 tabs: [
-                    Tab::new(LocalizedTab::Overview, rsx! {
+                    tabs::Tab::new(LocalizedTab::Overview, rsx! {
                         p { "Overview panel" }
                     })
                         .closable(true),
-                    Tab::new(LocalizedTab::Details, rsx! {
+                    tabs::Tab::new(LocalizedTab::Details, rsx! {
                         p { "Details panel" }
                     }),
                 ],
@@ -1003,13 +1358,18 @@ fn inline_owned_reorder_probe() -> Element {
         Tabs {
             default_value: "first",
             tabs: [
-                Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
+                tabs::Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
                     p { "Panel one" }
                 }),
-                Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
-                    p { "Panel two" }
-                }),
-                Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
+                tabs::Tab::new_with_label(
+                    "second",
+                    "Second",
+                    rsx! { "Second" },
+                    rsx! {
+                        p { "Panel two" }
+                    },
+                ),
+                tabs::Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
                     p { "Panel three" }
                 }),
             ],
@@ -1018,8 +1378,105 @@ fn inline_owned_reorder_probe() -> Element {
     }
 }
 
+fn static_close_message_probe() -> Element {
+    let mut locale = use_signal(locales::en_us);
+
+    let onclick = move |_| locale.set(locales::br());
+
+    let mut registries = I18nRegistries::new();
+
+    registries.register(
+        MessagesRegistry::new(core_tabs::Messages::default()).register(
+            "pt-BR",
+            core_tabs::Messages {
+                close_tab_label: MessageFn::new(|label: &str, _locale: &ars_core::Locale| {
+                    format!("Fechar {label}")
+                }),
+                reorder_announce_label: MessageFn::new(
+                    |label: &str, position: usize, total: usize, _locale: &ars_core::Locale| {
+                        format!("{label} movida para a posição {position} de {total}")
+                    },
+                ),
+            },
+        ),
+    );
+
+    rsx! {
+        ArsProvider { locale, i18n_registries: Some(Arc::new(registries)),
+            button { id: "switch-static-close-locale", onclick, "pt-BR" }
+            Tabs {
+                default_value: "inbox",
+                tabs: [
+                    tabs::Tab::new_with_label("inbox", "Inbox", rsx! { "Inbox" }, rsx! {
+                        p { "Inbox panel" }
+                    })
+                        .closable(true),
+                    tabs::Tab::new_with_label(
+                        "archive",
+                        "Archive",
+                        rsx! { "Archive" },
+                        rsx! {
+                            p { "Archive panel" }
+                        },
+                    ),
+                ],
+            }
+        }
+    }
+}
+
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+fn same_key_tab_context_refresh_probe() -> Element {
+    let mut updated = use_signal(|| false);
+
+    let (label, trigger, close_trigger) = if updated() {
+        (
+            "Inbox updated",
+            rsx! { "Inbox updated" },
+            rsx! { "Close updated" },
+        )
+    } else {
+        ("Inbox", rsx! { "Inbox" }, rsx! { "Close" })
+    };
+
+    rsx! {
+        button { id: "update-same-key-tab", onclick: move |_| updated.set(true), "Update" }
+        Tabs {
+            default_value: "inbox",
+            tabs: [
+                tabs::Tab::new_with_label("inbox", label, trigger, rsx! {
+                    p { "Inbox panel" }
+                })
+                    .closable(true)
+                    .close_trigger(close_trigger),
+                tabs::Tab::new_with_label(
+                    "archive",
+                    "Archive",
+                    rsx! { "Archive" },
+                    rsx! {
+                        p { "Archive panel" }
+                    },
+                ),
+            ],
+            tabs::List::<StaticStr> {
+                tab_row: |item: tabs::TabRenderItem<StaticStr>| rsx! {
+                    tabs::TabShell { item,
+                        tabs::Trigger::<StaticStr> {}
+                        tabs::CloseTrigger::<StaticStr> {}
+                    }
+                },
+            }
+            tabs::Panels::<StaticStr> {}
+        }
+    }
+}
+
 fn inline_owned_panel_state_probe() -> Element {
     let mut status = use_signal_sync(|| String::from("initial"));
+
     let onclick = move |_| {
         status.set(String::from("updated"));
     };
@@ -1028,11 +1485,11 @@ fn inline_owned_panel_state_probe() -> Element {
         Tabs {
             default_value: "first",
             tabs: [
-                Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
+                tabs::Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
                     button { id: "update-owned-panel-status", onclick, "Update" }
                     p { id: "owned-panel-status", "{status}" }
                 }),
-                Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
+                tabs::Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
                     p { "Panel two" }
                 }),
             ],
@@ -1066,12 +1523,59 @@ fn inline_owned_panel_close_after_refresh_probe() -> Element {
         Tabs {
             default_value: "first",
             tabs: [
-                Tab::new_with_label("first", "First", rsx! { "First" }, first_panel),
-                Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
+                tabs::Tab::new_with_label("first", "First", rsx! { "First" }, first_panel),
+                tabs::Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
                     p { "Panel two" }
                 })
                     .closable(true),
             ],
+        }
+    }
+}
+
+fn custom_parts_closable_selection_probe() -> Element {
+    rsx! {
+        tabs::Root {
+            default_value: "keyboard",
+            reorderable: true,
+            tabs: [
+                tabs::Tab::new_with_label(
+                    "overview",
+                    "Overview",
+                    rsx! { "Overview" },
+                    rsx! {
+                        p { "Overview panel" }
+                    },
+                ),
+                tabs::Tab::new_with_label(
+                        "keyboard",
+                        "Keyboard",
+                        rsx! { "Keyboard" },
+                        rsx! {
+                            p { "Keyboard panel" }
+                        },
+                    )
+                    .closable(true),
+                tabs::Tab::new_with_label(
+                        "closable",
+                        "Closable",
+                        rsx! { "Closable" },
+                        rsx! {
+                            p { "Closable panel" }
+                        },
+                    )
+                    .closable(true),
+            ],
+            tabs::List::<StaticStr> {
+                tab_row: |item: tabs::TabRenderItem<StaticStr>| rsx! {
+                    tabs::TabShell { item,
+                        tabs::Trigger::<StaticStr> {}
+                        tabs::CloseTrigger::<StaticStr> {}
+                    }
+                },
+            }
+            tabs::Panels::<StaticStr> {}
+            tabs::LiveRegion {}
         }
     }
 }
@@ -1083,6 +1587,7 @@ fn inline_owned_panel_close_after_refresh_probe() -> Element {
 #[component]
 fn LocalPanelState(id: &'static str, initial: &'static str) -> Element {
     let mut status = use_signal_sync(|| initial.to_owned());
+
     let updated = format!("{initial}-updated");
 
     rsx! {
@@ -1096,13 +1601,18 @@ fn inline_owned_panel_key_probe() -> Element {
         Tabs {
             default_value: "first",
             tabs: [
-                Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
+                tabs::Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
                     LocalPanelState { id: "first-panel-state", initial: "first" }
                 }),
-                Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
-                    LocalPanelState { id: "second-panel-state", initial: "second" }
-                }),
-                Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
+                tabs::Tab::new_with_label(
+                    "second",
+                    "Second",
+                    rsx! { "Second" },
+                    rsx! {
+                        LocalPanelState { id: "second-panel-state", initial: "second" }
+                    },
+                ),
+                tabs::Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
                     LocalPanelState { id: "third-panel-state", initial: "third" }
                 }),
             ],
@@ -1120,7 +1630,7 @@ fn inline_owned_dynamic_add_probe() -> Element {
 
     let tabs = if show_third() {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 rsx! { "First" },
@@ -1128,7 +1638,7 @@ fn inline_owned_dynamic_add_probe() -> Element {
                     p { "Panel one" }
                 },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 rsx! { "Second" },
@@ -1136,7 +1646,7 @@ fn inline_owned_dynamic_add_probe() -> Element {
                     p { "Panel two" }
                 },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "third",
                 "Third",
                 rsx! { "Third" },
@@ -1147,7 +1657,7 @@ fn inline_owned_dynamic_add_probe() -> Element {
         ]
     } else {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 rsx! { "First" },
@@ -1155,7 +1665,7 @@ fn inline_owned_dynamic_add_probe() -> Element {
                     p { "Panel one" }
                 },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 rsx! { "Second" },
@@ -1181,7 +1691,7 @@ fn inline_owned_parent_reorder_probe() -> Element {
 
     let tabs = if reversed() {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "third",
                 "Third",
                 rsx! { "Third" },
@@ -1189,7 +1699,7 @@ fn inline_owned_parent_reorder_probe() -> Element {
                     p { "Panel three" }
                 },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 rsx! { "Second" },
@@ -1197,7 +1707,7 @@ fn inline_owned_parent_reorder_probe() -> Element {
                     p { "Panel two" }
                 },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 rsx! { "First" },
@@ -1208,7 +1718,7 @@ fn inline_owned_parent_reorder_probe() -> Element {
         ]
     } else {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 rsx! { "First" },
@@ -1216,7 +1726,7 @@ fn inline_owned_parent_reorder_probe() -> Element {
                     p { "Panel one" }
                 },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 rsx! { "Second" },
@@ -1224,7 +1734,7 @@ fn inline_owned_parent_reorder_probe() -> Element {
                     p { "Panel two" }
                 },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "third",
                 "Third",
                 rsx! { "Third" },
@@ -1249,13 +1759,18 @@ fn inline_owned_indicator_reorder_probe() -> Element {
             Tabs {
                 default_value: "first",
                 tabs: [
-                    Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
+                    tabs::Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
                         p { "Panel one" }
                     }),
-                    Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
-                        p { "Panel two" }
-                    }),
-                    Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
+                    tabs::Tab::new_with_label(
+                        "second",
+                        "Second",
+                        rsx! { "Second" },
+                        rsx! {
+                            p { "Panel two" }
+                        },
+                    ),
+                    tabs::Tab::new_with_label("third", "Third", rsx! { "Third" }, rsx! {
                         p { "Panel three" }
                     }),
                 ],
@@ -1269,7 +1784,7 @@ fn external_reorder_without_callback_probe() -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(use_store(three_tabs)),
+            tabs: use_store(three_tabs),
             reorderable: true,
         }
     }
@@ -1297,13 +1812,13 @@ impl PartialEq for DisabledInteractionProbeProps {
 fn disabled_interaction_probe(props: DisabledInteractionProbeProps) -> Element {
     let tabs = use_store(|| {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 rsx! { "First" },
                 rsx! { p { "Panel one" } },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 rsx! { "Second" },
@@ -1311,7 +1826,7 @@ fn disabled_interaction_probe(props: DisabledInteractionProbeProps) -> Element {
             )
             .closable(true)
             .disabled(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "third",
                 "Third",
                 rsx! { "Third" },
@@ -1327,7 +1842,7 @@ fn disabled_interaction_probe(props: DisabledInteractionProbeProps) -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(tabs),
+            tabs,
             reorderable: true,
             on_close_tab: Callback::new(move |key| {
                 closed
@@ -1359,20 +1874,20 @@ fn disabled_interaction_probe(props: DisabledInteractionProbeProps) -> Element {
 fn disabled_drag_reorder_probe(props: DragReorderProbeProps) -> Element {
     let tabs = use_store(|| {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 rsx! { "First" },
                 rsx! { p { "Panel one" } },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 rsx! { "Second" },
                 rsx! { p { "Panel two" } },
             )
             .disabled(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "third",
                 "Third",
                 rsx! { "Third" },
@@ -1386,7 +1901,7 @@ fn disabled_drag_reorder_probe(props: DragReorderProbeProps) -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(tabs),
+            tabs,
             reorderable: true,
             on_reorder: Callback::new(move |event| {
                 reordered
@@ -1402,20 +1917,20 @@ fn disabled_drag_reorder_probe(props: DragReorderProbeProps) -> Element {
 fn vertical_disabled_hotkeys_probe() -> Element {
     let tabs = use_store(|| {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 rsx! { "First" },
                 rsx! { p { "Panel one" } },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 rsx! { "Second" },
                 rsx! { p { "Panel two" } },
             )
             .disabled(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "third",
                 "Third",
                 rsx! { "Third" },
@@ -1427,7 +1942,7 @@ fn vertical_disabled_hotkeys_probe() -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(tabs),
+            tabs,
             orientation: Orientation::Vertical,
         }
     }
@@ -1437,8 +1952,8 @@ fn manual_hotkeys_probe() -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(use_store(three_tabs)),
-            activation_mode: ActivationMode::Manual,
+            tabs: use_store(three_tabs),
+            activation_mode: tabs::ActivationMode::Manual,
         }
     }
 }
@@ -1448,10 +1963,7 @@ fn indicator_probe() -> Element {
 
     rsx! {
         ArsProvider { platform: Some(platform),
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+            Tabs { default_value: "first", tabs: use_store(three_tabs) }
         }
     }
 }
@@ -1470,7 +1982,7 @@ fn dynamic_orientation_indicator_probe() -> Element {
             button { id: "set-vertical", onclick: set_vertical, "vertical" }
             Tabs {
                 default_value: "second",
-                tabs: ReadStore::from(use_store(three_tabs)),
+                tabs: use_store(three_tabs),
                 orientation: orientation(),
             }
         }
@@ -1485,12 +1997,12 @@ fn visual_trigger_resize_probe() -> Element {
             Tabs {
                 default_value: "first",
                 tabs: [
-                    Tab::new_with_label("first", "First", rsx! {
+                    tabs::Tab::new_with_label("first", "First", rsx! {
                         span { "First" }
                     }, rsx! {
                         p { "Panel one" }
                     }),
-                    Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
+                    tabs::Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
                         p { "Panel two" }
                     }),
                 ],
@@ -1504,10 +2016,7 @@ fn focus_mount_probe() -> Element {
 
     rsx! {
         ArsProvider { platform: Some(platform),
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+            Tabs { default_value: "first", tabs: use_store(three_tabs) }
         }
     }
 }
@@ -1515,10 +2024,7 @@ fn focus_mount_probe() -> Element {
 fn mounted_focus_probe(props: MountedFocusProbeProps) -> Element {
     rsx! {
         ArsProvider { dioxus_platform: Some(props.dioxus_platform),
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+            Tabs { default_value: "first", tabs: use_store(three_tabs) }
         }
     }
 }
@@ -1544,7 +2050,7 @@ fn reorder_veto_probe(props: ReorderVetoProbeProps) -> Element {
     rsx! {
         Tabs {
             default_value: "first",
-            tabs: ReadStore::from(use_store(three_tabs)),
+            tabs: use_store(three_tabs),
             reorderable: true,
             on_reorder: Callback::new(move |event| {
                 reordered
@@ -1564,9 +2070,9 @@ fn reorder_veto_probe(props: ReorderVetoProbeProps) -> Element {
 fn link_callback_probe(props: LinkCallbackProbeProps) -> Element {
     let tabs = use_store(|| {
         vec![
-            Tab::new_with_label("home", "Home", rsx! { "Home" }, rsx! { p { "Home panel" } })
+            tabs::Tab::new_with_label("home", "Home", rsx! { "Home" }, rsx! { p { "Home panel" } })
                 .link(SafeUrl::from_static("/home")),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "settings",
                 "Settings",
                 rsx! { "Settings" },
@@ -1580,7 +2086,7 @@ fn link_callback_probe(props: LinkCallbackProbeProps) -> Element {
     rsx! {
         Tabs {
             default_value: "settings",
-            tabs: ReadStore::from(tabs),
+            tabs,
             on_value_change: move |key| selected.borrow_mut().push(key),
         }
     }
@@ -1604,10 +2110,10 @@ impl PartialEq for LinkCloseProbeProps {
 fn link_close_probe(props: LinkCloseProbeProps) -> Element {
     let tabs = use_store(|| {
         vec![
-            Tab::new_with_label("home", "Home", rsx! { "Home" }, rsx! { p { "Home panel" } })
+            tabs::Tab::new_with_label("home", "Home", rsx! { "Home" }, rsx! { p { "Home panel" } })
                 .link(SafeUrl::from_static("/home"))
                 .closable(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "settings",
                 "Settings",
                 rsx! { "Settings" },
@@ -1621,7 +2127,7 @@ fn link_close_probe(props: LinkCloseProbeProps) -> Element {
     rsx! {
         Tabs {
             default_value: "settings",
-            tabs: ReadStore::from(tabs),
+            tabs,
             on_close_tab: move |key| closed.borrow_mut().push(key),
         }
     }
@@ -1634,9 +2140,9 @@ fn link_close_probe(props: LinkCloseProbeProps) -> Element {
 fn manual_link_callback_probe(props: LinkCallbackProbeProps) -> Element {
     let tabs = use_store(|| {
         vec![
-            Tab::new_with_label("home", "Home", rsx! { "Home" }, rsx! { p { "Home panel" } })
+            tabs::Tab::new_with_label("home", "Home", rsx! { "Home" }, rsx! { p { "Home panel" } })
                 .link(SafeUrl::from_static("/home")),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "settings",
                 "Settings",
                 rsx! { "Settings" },
@@ -1650,8 +2156,8 @@ fn manual_link_callback_probe(props: LinkCallbackProbeProps) -> Element {
     rsx! {
         Tabs {
             default_value: "settings",
-            tabs: ReadStore::from(tabs),
-            activation_mode: ActivationMode::Manual,
+            tabs,
+            activation_mode: tabs::ActivationMode::Manual,
             on_value_change: move |key| selected.borrow_mut().push(key),
         }
     }
@@ -2005,6 +2511,47 @@ async fn web_store_mutations_update_tabs_without_remounting() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn web_custom_close_trigger_preserves_hook_order_when_closability_changes() {
+    let parent = container();
+    let dom = VirtualDom::new(custom_close_trigger_hook_order_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert!(
+        parent
+            .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+            .expect("query should succeed")
+            .is_none(),
+        "custom close trigger should render nothing before the row is closable"
+    );
+
+    click(
+        &parent
+            .query_selector("#make-custom-close-trigger-closable")
+            .expect("query should succeed")
+            .expect("closable button")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert!(
+        parent
+            .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+            .expect("query should succeed")
+            .is_some(),
+        "custom close trigger should render after the row becomes closable"
+    );
+}
+
+#[wasm_bindgen_test(async)]
 async fn web_close_callback_can_remove_tab_from_store() {
     let parent = container();
     let dom = VirtualDom::new(close_mutates_store_probe);
@@ -2201,6 +2748,47 @@ async fn web_translated_owned_tab_labels_update_when_locale_changes() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn web_static_close_trigger_label_reacts_to_provider_message_changes() {
+    let parent = container();
+    let dom = VirtualDom::new(static_close_message_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    let close = parent
+        .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+        .expect("query should succeed")
+        .expect("close trigger should exist");
+
+    assert_eq!(
+        close.get_attribute("aria-label").as_deref(),
+        Some("Close Inbox")
+    );
+
+    click(
+        &parent
+            .query_selector("#switch-static-close-locale")
+            .expect("query should succeed")
+            .expect("locale button should render")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        close.get_attribute("aria-label").as_deref(),
+        Some("Fechar Inbox"),
+        "close trigger should recompute its aria-label when provider messages change"
+    );
+}
+
+#[wasm_bindgen_test(async)]
 async fn web_inline_array_owned_tabs_refresh_existing_panel_content() {
     let parent = container();
     let dom = VirtualDom::new(inline_owned_panel_state_probe);
@@ -2278,6 +2866,188 @@ async fn web_inline_array_owned_tabs_keep_refreshed_panel_after_close() {
         "updated",
         "closing another owned tab must not restore stale same-key panel content"
     );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_tab_shell_context_refreshes_same_key_trigger_and_close_content() {
+    let parent = container();
+    let dom = VirtualDom::new(same_key_tab_context_refresh_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).text_content().unwrap_or_default(),
+        "Inbox"
+    );
+    assert_eq!(
+        first_with_data_part(&parent, "tab-close-trigger")
+            .text_content()
+            .unwrap_or_default(),
+        "Close"
+    );
+
+    click(
+        &parent
+            .query_selector("#update-same-key-tab")
+            .expect("query should succeed")
+            .expect("update button should render")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        tab_at(&parent, 0).text_content().unwrap_or_default(),
+        "Inbox updated",
+        "same-key trigger content should refresh through TabShell item context"
+    );
+    assert_eq!(
+        first_with_data_part(&parent, "tab-close-trigger")
+            .text_content()
+            .unwrap_or_default(),
+        "Close updated",
+        "same-key close content should refresh through TabShell item context"
+    );
+    assert_eq!(
+        first_with_data_part(&parent, "tab-close-trigger")
+            .get_attribute("aria-label")
+            .as_deref(),
+        Some("Close Inbox updated"),
+        "same-key close aria-label should use the refreshed row label"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_custom_parts_keep_closable_labels_after_selection_changes() {
+    let parent = container();
+    let dom = VirtualDom::new(custom_parts_closable_selection_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(selected_tab_text(&parent), "Keyboard");
+    assert_eq!(
+        tab_at(&parent, 1).text_content().unwrap_or_default(),
+        "Keyboard"
+    );
+
+    click(&tab_at(&parent, 2));
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        selected_tab_text(&parent),
+        "Closable",
+        "clicking another closable custom part tab should select it"
+    );
+    assert_eq!(
+        tab_at(&parent, 1).text_content().unwrap_or_default(),
+        "Keyboard",
+        "previously selected closable custom part tab should keep its trigger label"
+    );
+    assert_eq!(
+        tab_at(&parent, 1).get_attribute("aria-selected").as_deref(),
+        None,
+        "previously selected closable trigger should omit false selected ARIA after selection moves: {}",
+        tab_at(&parent, 1).outer_html()
+    );
+    assert!(
+        tab_at(&parent, 1)
+            .get_attribute("data-ars-selected")
+            .is_none(),
+        "previously selected closable trigger should not keep selected styling attrs"
+    );
+    assert!(
+        !tab_shell_at(&parent, 1).has_attribute("data-ars-selected"),
+        "previously selected closable shell should not keep selected styling attrs"
+    );
+    assert!(
+        tab_shell_at(&parent, 2).has_attribute("data-ars-selected"),
+        "newly selected closable shell should receive selected styling attrs"
+    );
+    assert_eq!(
+        tab_at(&parent, 2).text_content().unwrap_or_default(),
+        "Closable",
+        "newly selected closable custom part tab should keep its trigger label"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_custom_parts_keep_closable_selection_state_after_reorder() {
+    let parent = container();
+    let dom = VirtualDom::new(custom_parts_closable_selection_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(selected_tab_text(&parent), "Keyboard");
+
+    let keyboard = tab_at(&parent, 1);
+    let overview = tab_at(&parent, 0);
+
+    dispatch_drag_event(&keyboard, "dragstart");
+    dispatch_drag_event(&overview, "drop");
+
+    deferred_focus_turn().await;
+
+    assert_eq!(
+        selected_tab_text(&parent),
+        "Keyboard",
+        "reordering selected custom part tab should preserve selected semantic key"
+    );
+
+    let tabs = first_with_data_part(&parent, "list")
+        .query_selector_all(r#"[role="tab"]"#)
+        .expect("query should succeed");
+
+    let rendered_order = (0..tabs.length())
+        .map(|index| {
+            tabs.item(index)
+                .unwrap_or_else(|| panic!("tab {index} should exist"))
+                .text_content()
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        rendered_order,
+        ["Keyboard", "Overview", "Closable"],
+        "custom tab row renderer should visually reorder rows with the semantic tab order"
+    );
+
+    for index in 0..tabs.length() {
+        let tab = tabs
+            .item(index)
+            .unwrap_or_else(|| panic!("tab {index} should exist"))
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("tab is HtmlElement");
+        let text = tab.text_content().unwrap_or_default();
+        let is_selected = tab.get_attribute("data-ars-selected").is_some();
+
+        assert_eq!(
+            is_selected,
+            text == "Keyboard",
+            "selected styling attrs should follow the selected tab key after reorder: {}",
+            tab.outer_html()
+        );
+    }
 }
 
 #[wasm_bindgen_test(async)]
@@ -2652,7 +3422,9 @@ async fn web_signal_backed_reorderable_updates_attrs_and_blocks_stale_drop() {
     animation_frame_turn().await;
 
     assert_eq!(
-        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        tab_shell_at(&parent, 0)
+            .get_attribute("draggable")
+            .as_deref(),
         Some("false")
     );
     assert_eq!(
@@ -2665,7 +3437,9 @@ async fn web_signal_backed_reorderable_updates_attrs_and_blocks_stale_drop() {
     animation_frame_turn().await;
 
     assert_eq!(
-        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        tab_shell_at(&parent, 0)
+            .get_attribute("draggable")
+            .as_deref(),
         Some("true")
     );
     assert_eq!(
@@ -2685,7 +3459,9 @@ async fn web_signal_backed_reorderable_updates_attrs_and_blocks_stale_drop() {
     animation_frame_turn().await;
 
     assert_eq!(
-        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        tab_shell_at(&parent, 0)
+            .get_attribute("draggable")
+            .as_deref(),
         Some("false")
     );
     assert_eq!(
@@ -2813,6 +3589,49 @@ async fn web_panel_attrs_react_to_selection_changes() {
             .unwrap_or_default(),
         "Panel two",
         "panel hidden state and unmount_on_exit body should update with tab selection"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn web_non_config_prop_changes_refresh_child_context() {
+    let parent = container();
+    let dom = VirtualDom::new(dynamic_lazy_mount_probe);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    animation_frame_turn().await;
+    animation_frame_turn().await;
+
+    assert_eq!(
+        parent
+            .query_selector_all(r#"[role="tabpanel"] p"#)
+            .expect("query should succeed")
+            .length(),
+        1,
+        "lazy_mount=true should initially render only the selected panel"
+    );
+
+    click(
+        &parent
+            .query_selector("#disable-lazy-mount")
+            .expect("query should succeed")
+            .expect("button should render")
+            .dyn_into::<web_sys::HtmlElement>()
+            .expect("button is HtmlElement"),
+    );
+
+    animation_frame_turn().await;
+
+    assert_eq!(
+        parent
+            .query_selector_all(r#"[role="tabpanel"] p"#)
+            .expect("query should succeed")
+            .length(),
+        3,
+        "lazy_mount prop changes should bump child context so panels mount immediately"
     );
 }
 
@@ -3177,10 +3996,7 @@ async fn web_indicator_style_degrades_to_empty_without_geometry() {
 
     fn app() -> Element {
         rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+            Tabs { default_value: "first", tabs: use_store(three_tabs) }
         }
     }
 
@@ -3433,10 +4249,7 @@ async fn web_tab_key_entry_target_tracks_selected_roving_tabindex() {
 
     fn app() -> Element {
         rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+            Tabs { default_value: "first", tabs: use_store(three_tabs) }
         }
     }
 
@@ -3513,10 +4326,7 @@ async fn web_browser_tabbable_order_tracks_only_the_selected_roving_tab() {
 
     fn app() -> Element {
         rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+            Tabs { default_value: "first", tabs: use_store(three_tabs) }
         }
     }
 
@@ -3607,10 +4417,7 @@ async fn web_focus_visible_tracks_keyboard_and_pointer_modality() {
     fn app() -> Element {
         rsx! {
             ArsProvider {
-                Tabs {
-                    default_value: "first",
-                    tabs: ReadStore::from(use_store(three_tabs)),
-                }
+                Tabs { default_value: "first", tabs: use_store(three_tabs) }
             }
         }
     }
@@ -3666,8 +4473,8 @@ async fn web_manual_roving_focus_updates_focus_visible_without_selection_change(
             ArsProvider {
                 Tabs {
                     default_value: "first",
-                    activation_mode: ActivationMode::Manual,
-                    tabs: ReadStore::from(use_store(three_tabs)),
+                    activation_mode: tabs::ActivationMode::Manual,
+                    tabs: use_store(three_tabs),
                 }
             }
         }
@@ -3791,10 +4598,7 @@ async fn web_pointerdown_modality_supports_mouse_touch_and_pen() {
     fn app() -> Element {
         rsx! {
             ArsProvider {
-                Tabs {
-                    default_value: "first",
-                    tabs: ReadStore::from(use_store(three_tabs)),
-                }
+                Tabs { default_value: "first", tabs: use_store(three_tabs) }
             }
         }
     }
@@ -3855,10 +4659,7 @@ async fn web_virtual_click_preserves_keyboard_focus_visible_modality() {
     fn app() -> Element {
         rsx! {
             ArsProvider {
-                Tabs {
-                    default_value: "first",
-                    tabs: ReadStore::from(use_store(three_tabs)),
-                }
+                Tabs { default_value: "first", tabs: use_store(three_tabs) }
             }
         }
     }
@@ -3917,10 +4718,10 @@ async fn web_closable_tab_dispatches_close_on_delete_and_backspace() {
 
     let close_trigger = first_with_data_part(&parent, "tab-close-trigger");
 
-    assert_eq!(close_trigger.tag_name(), "BUTTON");
+    assert_eq!(close_trigger.tag_name(), "SPAN");
     assert_eq!(
         close_trigger.get_attribute("tabindex").as_deref(),
-        Some("-1"),
+        None,
         "close trigger must NOT participate in roving tabindex"
     );
 
@@ -4024,8 +4825,8 @@ async fn web_repeated_and_composing_manual_activation_hotkeys_do_not_select() {
         rsx! {
             Tabs {
                 default_value: "second",
-                tabs: ReadStore::from(use_store(three_tabs)),
-                activation_mode: ActivationMode::Manual,
+                tabs: use_store(three_tabs),
+                activation_mode: tabs::ActivationMode::Manual,
             }
         }
     }
@@ -4094,14 +4895,14 @@ async fn web_close_trigger_click_does_not_select_its_tab() {
     fn probe(props: Props) -> Element {
         let tabs = use_store(|| {
             vec![
-                Tab::new_with_label(
+                tabs::Tab::new_with_label(
                     "first",
                     "First",
                     rsx! { "First" },
                     rsx! { p { "Panel one" } },
                 )
                 .closable(true),
-                Tab::new_with_label(
+                tabs::Tab::new_with_label(
                     "second",
                     "Second",
                     rsx! { "Second" },
@@ -4115,7 +4916,7 @@ async fn web_close_trigger_click_does_not_select_its_tab() {
         rsx! {
             Tabs {
                 default_value: "second",
-                tabs: ReadStore::from(tabs),
+                tabs,
                 on_close_tab: Callback::new(move |key| {
                     closed
                         .lock()
@@ -4247,10 +5048,7 @@ async fn web_disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() 
 fn wasm_virtualdom_rebuild_does_not_panic() {
     fn app() -> Element {
         rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+            Tabs { default_value: "first", tabs: use_store(three_tabs) }
         }
     }
 
@@ -4269,7 +5067,7 @@ fn wasm_reorderable_path_compiles_and_runs() {
         rsx! {
             Tabs {
                 default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
+                tabs: use_store(three_tabs),
                 reorderable: true,
             }
         }
@@ -4289,13 +5087,18 @@ fn wasm_closable_path_compiles_and_runs() {
     fn app() -> Element {
         let closable_tabs = use_store(|| {
             vec![
-                Tab::new_with_label("inbox", "Inbox", rsx! { "Inbox" }, rsx! { p { "Inbox" } })
-                    .closable(true),
+                tabs::Tab::new_with_label(
+                    "inbox",
+                    "Inbox",
+                    rsx! { "Inbox" },
+                    rsx! { p { "Inbox" } },
+                )
+                .closable(true),
             ]
         });
 
         rsx! {
-            Tabs { default_value: "inbox", tabs: ReadStore::from(closable_tabs) }
+            Tabs { default_value: "inbox", tabs: closable_tabs }
         }
     }
 
@@ -4314,7 +5117,7 @@ fn wasm_lazy_mount_path_compiles_and_runs() {
         rsx! {
             Tabs {
                 default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
+                tabs: use_store(three_tabs),
                 lazy_mount: true,
                 unmount_on_exit: true,
             }
@@ -4336,8 +5139,8 @@ fn wasm_manual_activation_mode_path_compiles_and_runs() {
         rsx! {
             Tabs {
                 default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-                activation_mode: ActivationMode::Manual,
+                tabs: use_store(three_tabs),
+                activation_mode: tabs::ActivationMode::Manual,
             }
         }
     }
@@ -4358,20 +5161,19 @@ fn wasm_attrs_observable_through_machine_connect_api() {
     // / aria-* attribute names on wasm as on native, since the agnostic
     // core has no target-specific code paths but the test runs the
     // wasm32 build of `ars-components`.
-    use ars_components::navigation::tabs::{Machine, Props, TabRegistration};
     use ars_core::{Env, Service};
 
-    let mut service = Service::<Machine>::new(
-        Props::new()
+    let mut service = Service::<core_tabs::Machine>::new(
+        core_tabs::Props::new()
             .id("test-tabs")
             .default_value(Some(Key::str("first"))),
         &Env::default(),
-        &tabs::Messages::default(),
+        &core_tabs::Messages::default(),
     );
 
-    drop(service.send(tabs::Event::SetTabs(vec![
-        TabRegistration::new(Key::str("first")),
-        TabRegistration::new(Key::str("second")),
+    drop(service.send(core_tabs::Event::SetTabs(vec![
+        core_tabs::TabRegistration::new(Key::str("first")),
+        core_tabs::TabRegistration::new(Key::str("second")),
     ])));
 
     let api = service.connect(&|_| {});
@@ -4417,14 +5219,11 @@ fn wasm_send_lifecycle_dispatches_through_machine() {
 
             machine
                 .send
-                .call(tabs::Event::SelectTab(Key::str("second")));
+                .call(core_tabs::Event::SelectTab(Key::str("second")));
         }
 
         rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+            Tabs { default_value: "first", tabs: use_store(three_tabs) }
         }
     }
 
@@ -4448,19 +5247,19 @@ fn wasm_send_lifecycle_dispatches_through_machine() {
     );
 }
 
-fn use_machine_for_probe() -> ars_dioxus::UseMachineReturn<tabs::Machine> {
+fn use_machine_for_probe() -> ars_dioxus::UseMachineReturn<core_tabs::Machine> {
     // Independent probe machine reused across this test to avoid
     // coupling to the Tabs adapter's internal machine. We register the
     // same tabs ourselves to exercise the SetTabs / SelectTab events.
-    let machine = ars_dioxus::use_machine::<tabs::Machine>(
-        tabs::Props::new()
+    let machine = ars_dioxus::use_machine::<core_tabs::Machine>(
+        core_tabs::Props::new()
             .id("probe-tabs")
             .default_value(Some(Key::str("first"))),
     );
 
-    machine.send.call(tabs::Event::SetTabs(vec![
-        tabs::TabRegistration::new(Key::str("first")),
-        tabs::TabRegistration::new(Key::str("second")),
+    machine.send.call(core_tabs::Event::SetTabs(vec![
+        core_tabs::TabRegistration::new(Key::str("first")),
+        core_tabs::TabRegistration::new(Key::str("second")),
     ]));
 
     machine
@@ -4468,32 +5267,31 @@ fn use_machine_for_probe() -> ars_dioxus::UseMachineReturn<tabs::Machine> {
 
 #[wasm_bindgen_test]
 fn reorder_announcement_uses_messages_template() {
-    use ars_components::navigation::tabs::{Machine, Messages, Props, TabRegistration};
     use ars_core::{Env, MessageFn, Service};
 
     // Direct test against the agnostic Api so we verify the template
     // path without needing a custom-Messages provider in the adapter.
-    let messages = Messages {
+    let messages = core_tabs::Messages {
         reorder_announce_label: MessageFn::new(
             |label: &str, position: usize, total: usize, _locale: &ars_core::Locale| {
                 format!("DIOXUS {label} @ {position}/{total}")
             },
         ),
-        ..Messages::default()
+        ..core_tabs::Messages::default()
     };
 
-    let mut service = Service::<Machine>::new(
-        Props::new()
+    let mut service = Service::<core_tabs::Machine>::new(
+        core_tabs::Props::new()
             .id("dioxus-reorder-i18n")
             .default_value(Some(Key::str("a"))),
         &Env::default(),
         &messages,
     );
 
-    drop(service.send(tabs::Event::SetTabs(vec![
-        TabRegistration::new(Key::str("a")),
-        TabRegistration::new(Key::str("b")),
-        TabRegistration::new(Key::str("c")),
+    drop(service.send(core_tabs::Event::SetTabs(vec![
+        core_tabs::TabRegistration::new(Key::str("a")),
+        core_tabs::TabRegistration::new(Key::str("b")),
+        core_tabs::TabRegistration::new(Key::str("c")),
     ])));
 
     let api = service.connect(&|_| {});

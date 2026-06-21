@@ -443,9 +443,7 @@ where
     let resolved_options = options();
 
     use_memo(use_reactive!(|explicit_locale, resolved_options| {
-        let resolved_locale = explicit_locale
-            .clone()
-            .unwrap_or_else(|| locale.read().clone());
+        let resolved_locale = explicit_locale.clone().unwrap_or_else(|| locale.cloned());
 
         number::Formatter::new(&resolved_locale, resolved_options.clone())
     }))
@@ -2515,9 +2513,9 @@ mod wasm_tests {
             color_mode: format!("{:?}", *context.color_mode.read()),
             disabled: *context.disabled.read(),
             read_only: *context.read_only.read(),
-            id_prefix: context.id_prefix.read().clone(),
-            portal_container_id: context.portal_container_id.read().clone(),
-            root_node_id: context.root_node_id.read().clone(),
+            id_prefix: context.id_prefix.cloned(),
+            portal_container_id: context.portal_container_id.cloned(),
+            root_node_id: context.root_node_id.cloned(),
             style_strategy: format!("{:?}", context.style_strategy()),
             nonce_rules: nonce_context
                 .rules

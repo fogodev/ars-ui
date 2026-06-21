@@ -155,7 +155,7 @@ Dioxus should handle text and change events without creating a second local draf
 pub fn ColorField() -> Element {
     let machine = use_machine::<color_field::Machine>(color_field::Props::default());
     let input_attrs = machine.derive(|api| api.input_attrs());
-    rsx! { input { ..input_attrs.read().clone() } }
+    rsx! { input { ..input_attrs.cloned() } }
 }
 ```
 

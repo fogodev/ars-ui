@@ -154,7 +154,7 @@ pub struct ColorSwatchPickerSketchProps {
 pub fn ColorSwatchPicker(props: ColorSwatchPickerSketchProps) -> Element {
     let machine = use_machine::<color_swatch_picker::Machine>(color_swatch_picker::Props { colors: props.colors, ..Default::default() });
     let root_attrs = machine.derive(|api| api.root_attrs());
-    rsx! { div { ..root_attrs.read().clone() } }
+    rsx! { div { ..root_attrs.cloned() } }
 }
 ```
 

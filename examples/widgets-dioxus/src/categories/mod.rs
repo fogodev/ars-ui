@@ -8,15 +8,14 @@ mod selection;
 mod specialized;
 mod utility;
 
-use ars_dioxus::navigation::tabs::{Tab, Tabs};
-use dioxus::prelude::*;
+use ars_dioxus::prelude::*;
 
 use crate::text::CategoryTab;
 
 #[component]
 pub(crate) fn CategoryTabs() -> Element {
     rsx! {
-        Tabs {
+        tabs::Root {
             default_value: CategoryTab::Utility,
             tabs: [
                 Tab::new(CategoryTab::Input, input::InputPanel()),
@@ -29,6 +28,9 @@ pub(crate) fn CategoryTabs() -> Element {
                 Tab::new(CategoryTab::Specialized, specialized::SpecializedPanel()),
                 Tab::new(CategoryTab::Utility, utility::UtilityPanel()),
             ],
+            tabs::List::<CategoryTab> {}
+            tabs::Panels::<CategoryTab> {}
+            tabs::LiveRegion {}
         }
     }
 }

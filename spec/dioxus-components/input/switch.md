@@ -187,14 +187,14 @@ Dioxus should prefer plain props for the public surface, keep attrs in `derive(.
 let machine = use_machine::<switch::Machine>(props);
 
 rsx! {
-    label { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        span { ..machine.derive(|api| api.label_attrs()).read().clone(), {children} }
+    label { ..machine.derive(|api| api.root_attrs()).cloned(),
+        span { ..machine.derive(|api| api.label_attrs()).cloned(), {children} }
         button {
-            ..machine.derive(|api| api.control_attrs()).read().clone(),
+            ..machine.derive(|api| api.control_attrs()).cloned(),
             onclick: move |_| machine.send.call(switch::Event::Toggle),
-            span { ..machine.derive(|api| api.thumb_attrs()).read().clone() }
+            span { ..machine.derive(|api| api.thumb_attrs()).cloned() }
         }
-        input { ..machine.derive(|api| api.hidden_input_attrs()).read().clone() }
+        input { ..machine.derive(|api| api.hidden_input_attrs()).cloned() }
     }
 }
 ```

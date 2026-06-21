@@ -153,19 +153,19 @@ pub mod drawer {
 
 ## 4. Part Mapping
 
-| Core part / structure | Required? | Adapter rendering target | Ownership         | Attr source                 | Notes                                                                         |
-| --------------------- | --------- | ------------------------ | ----------------- | --------------------------- | ----------------------------------------------------------------------------- |
-| Root                  | required  | `<div>` wrapper          | adapter-owned     | `api.root_attrs()`          | Container for the compound component tree; not portalled.                     |
-| Trigger               | required  | native `<button>`        | consumer-composed | `api.trigger_attrs()`       | Placed inline with consumer content, outside the portal.                      |
-| Backdrop              | required  | `<div>` in portal root   | adapter-owned     | `api.backdrop_attrs()`      | Sibling of Positioner inside the portal root (backdrop sibling pattern).      |
-| Positioner            | required  | `<div>` in portal root   | adapter-owned     | `api.positioner_attrs()`    | Contains Content; owns CSS transform for slide animation.                     |
-| Content               | required  | `<div>` in portal root   | adapter-owned     | `api.content_attrs()`       | `role="dialog"`, focus-trap target, drag gesture surface.                     |
-| Title                 | optional  | `<h{n}>` element         | consumer-composed | `api.title_attrs()`         | Heading level from `title_level` prop. Labels Content via `aria-labelledby`.  |
-| Description           | optional  | `<div>` element          | consumer-composed | `api.description_attrs()`   | Describes Content via `aria-describedby`.                                     |
-| Header                | optional  | `<div>` element          | consumer-composed | `api.header_attrs()`        | Structural layout part.                                                       |
-| Body                  | optional  | `<div>` element          | consumer-composed | `api.body_attrs()`          | Structural layout part.                                                       |
-| Footer                | optional  | `<div>` element          | consumer-composed | `api.footer_attrs()`        | Structural layout part.                                                       |
-| CloseTrigger          | optional  | native `<button>`        | consumer-composed | `api.close_trigger_attrs()` | `aria-label` from `Messages.close_label`.                                     |
+| Core part / structure | Required? | Adapter rendering target | Ownership         | Attr source                 | Notes                                                                                                                              |
+| --------------------- | --------- | ------------------------ | ----------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Root                  | required  | `<div>` wrapper          | adapter-owned     | `api.root_attrs()`          | Container for the compound component tree; not portalled.                                                                          |
+| Trigger               | required  | native `<button>`        | consumer-composed | `api.trigger_attrs()`       | Placed inline with consumer content, outside the portal.                                                                           |
+| Backdrop              | required  | `<div>` in portal root   | adapter-owned     | `api.backdrop_attrs()`      | Sibling of Positioner inside the portal root (backdrop sibling pattern).                                                           |
+| Positioner            | required  | `<div>` in portal root   | adapter-owned     | `api.positioner_attrs()`    | Contains Content; owns CSS transform for slide animation.                                                                          |
+| Content               | required  | `<div>` in portal root   | adapter-owned     | `api.content_attrs()`       | `role="dialog"`, focus-trap target, drag gesture surface.                                                                          |
+| Title                 | optional  | `<h{n}>` element         | consumer-composed | `api.title_attrs()`         | Heading level from `title_level` prop. Labels Content via `aria-labelledby`.                                                       |
+| Description           | optional  | `<div>` element          | consumer-composed | `api.description_attrs()`   | Describes Content via `aria-describedby`.                                                                                          |
+| Header                | optional  | `<div>` element          | consumer-composed | `api.header_attrs()`        | Structural layout part.                                                                                                            |
+| Body                  | optional  | `<div>` element          | consumer-composed | `api.body_attrs()`          | Structural layout part.                                                                                                            |
+| Footer                | optional  | `<div>` element          | consumer-composed | `api.footer_attrs()`        | Structural layout part.                                                                                                            |
+| CloseTrigger          | optional  | native `<button>`        | consumer-composed | `api.close_trigger_attrs()` | `aria-label` from `Messages.close_label`.                                                                                          |
 | DragHandle            | optional  | `<div>` element          | consumer-composed | `api.drag_handle_attrs()`   | `role="slider"` with accessible name and `tabindex="0"` when bottom-sheet snap points are active; keyboard snap navigation target. |
 
 ## 5. Attr Merge and Ownership Rules
@@ -227,15 +227,15 @@ Controlled `open` uses a deferred `use_effect` watcher that sends `Open`/`Close`
 
 ## 8. Registration and Cleanup Contract
 
-| Registered entity      | Registration trigger               | Identity key       | Cleanup trigger                                 | Cleanup action                                                        | Notes                                                 |
-| ---------------------- | ---------------------------------- | ------------------ | ----------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
-| dialog stack entry     | drawer opens (modal)               | drawer instance ID | drawer closes or component cleanup              | `dialog_stack_pop(id)` and re-apply inert for new top                 | shared with Dialog                                    |
-| scroll lock            | drawer opens with `prevent_scroll` | drawer instance ID | drawer closes or component cleanup              | restore body scroll position and overflow                             | nested drawer inherits outermost lock                 |
-| focus scope            | drawer opens (modal)               | drawer instance ID | drawer closes or component cleanup              | deactivate focus trap, restore focus to trigger or `final_focus`      | FocusScope stacking for nested overlays               |
+| Registered entity      | Registration trigger               | Identity key               | Cleanup trigger                                 | Cleanup action                                                                                                                                          | Notes                                                 |
+| ---------------------- | ---------------------------------- | -------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| dialog stack entry     | drawer opens (modal)               | drawer instance ID         | drawer closes or component cleanup              | `dialog_stack_pop(id)` and re-apply inert for new top                                                                                                   | shared with Dialog                                    |
+| scroll lock            | drawer opens with `prevent_scroll` | drawer instance ID         | drawer closes or component cleanup              | restore body scroll position and overflow                                                                                                               | nested drawer inherits outermost lock                 |
+| focus scope            | drawer opens (modal)               | drawer instance ID         | drawer closes or component cleanup              | deactivate focus trap, restore focus to trigger or `final_focus`                                                                                        | FocusScope stacking for nested overlays               |
 | z-index allocation     | core emits `AllocateZIndex`        | `Context::z_index_request` | core emits `ReleaseZIndex` or component cleanup | release allocated z-index and send `SetZIndex { request_id, z_index }` feedback while mounted; stale feedback after close/reopen is ignored by the core | via ZIndexAllocator context                           |
-| Dismissable listeners  | drawer opens on the client         | drawer instance ID | drawer closes or component cleanup              | remove document-level pointer/focus/Escape listeners                  | client-only (Web); platform-adapted on Desktop/Mobile |
-| Presence animation     | portal content mounts              | drawer instance ID | exit animation completes or component cleanup   | unmount portal content                                                | coordinates lazy_mount and unmount_on_exit            |
-| drag gesture listeners | drag starts on the client          | drawer instance ID | drag ends or component cleanup                  | remove pointer/touch move/up listeners                                | client-only (Web); platform-adapted on Desktop/Mobile |
+| Dismissable listeners  | drawer opens on the client         | drawer instance ID         | drawer closes or component cleanup              | remove document-level pointer/focus/Escape listeners                                                                                                    | client-only (Web); platform-adapted on Desktop/Mobile |
+| Presence animation     | portal content mounts              | drawer instance ID         | exit animation completes or component cleanup   | unmount portal content                                                                                                                                  | coordinates lazy_mount and unmount_on_exit            |
+| drag gesture listeners | drag starts on the client          | drawer instance ID         | drag ends or component cleanup                  | remove pointer/touch move/up listeners                                                                                                                  | client-only (Web); platform-adapted on Desktop/Mobile |
 
 ## 9. Ref and Node Contract
 
@@ -490,7 +490,7 @@ pub fn Drawer(props: DrawerProps) -> Element {
         let mut prev_open: Signal<Option<bool>> = use_signal(|| None);
         use_effect(move || {
             let new_open = *open_sig.read();
-            let prev = prev_open.read().clone();
+            let prev = prev_open.cloned();
             if prev.as_ref() != Some(&new_open) {
                 if prev.is_some() {
                     if new_open {
@@ -592,8 +592,8 @@ pub fn Content(props: ContentProps) -> Element {
             div {
                 role: "dialog",
                 "aria-modal": "true",
-                "aria-labelledby": title_id.read().clone(),
-                "aria-describedby": desc_id.read().clone(),
+                "aria-labelledby": title_id.cloned(),
+                "aria-describedby": desc_id.cloned(),
                 "data-ars-scope": "drawer",
                 "data-ars-part": "content",
                 onkeydown: move |e: KeyboardEvent| {
@@ -618,7 +618,7 @@ pub fn Title(props: TitleProps) -> Element {
         .expect("drawer::Title must be used inside Drawer");
     rsx! {
         h2 {
-            id: ctx.title_id.read().clone(),
+            id: ctx.title_id.cloned(),
             "data-ars-scope": "drawer",
             "data-ars-part": "title",
             {props.children}
@@ -637,7 +637,7 @@ pub fn Description(props: DescriptionProps) -> Element {
         .expect("drawer::Description must be used inside Drawer");
     rsx! {
         div {
-            id: ctx.description_id.read().clone(),
+            id: ctx.description_id.cloned(),
             "data-ars-scope": "drawer",
             "data-ars-part": "description",
             {props.children}
@@ -816,24 +816,24 @@ Traceability note: this adapter spec explicitly restates the following adapter-o
 
 ## 30. Test Oracle Notes
 
-| Behavior                      | Preferred oracle type | Notes                                                                                    |
-| ----------------------------- | --------------------- | ---------------------------------------------------------------------------------------- |
-| Drawer open/close state       | DOM attrs             | Assert `data-ars-state="open"` / `"closed"` on Root and `aria-expanded` on Trigger.      |
-| Placement and slide direction | DOM attrs             | Assert `data-ars-scope="drawer"` and CSS transform direction on Positioner.              |
-| Focus trapping                | rendered structure    | Assert focus remains within Content when Tab is pressed.                                 |
-| Focus restoration             | rendered structure    | Assert `document.activeElement` matches trigger or `final_focus` after close.            |
-| Scroll lock                   | DOM attrs             | Assert body `overflow: hidden` when open, restored when closed.                          |
-| Dialog stack and inert        | DOM attrs             | Assert sibling elements have `inert` when drawer is open; removed when closed.           |
-| Backdrop dismiss              | callback order        | Assert `CloseOnBackdropClick` fires before `on_open_change(false)`.                      |
-| Escape dismiss                | callback order        | Assert `CloseOnEscape` fires before `on_open_change(false)`.                             |
-| Drag gesture state            | machine state         | Assert `Dragging(position)` during active drag.                                          |
-| Snap resolution               | machine state         | Assert correct snap index after drag end with velocity.                                  |
+| Behavior                      | Preferred oracle type | Notes                                                                                                                     |
+| ----------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Drawer open/close state       | DOM attrs             | Assert `data-ars-state="open"` / `"closed"` on Root and `aria-expanded` on Trigger.                                       |
+| Placement and slide direction | DOM attrs             | Assert `data-ars-scope="drawer"` and CSS transform direction on Positioner.                                               |
+| Focus trapping                | rendered structure    | Assert focus remains within Content when Tab is pressed.                                                                  |
+| Focus restoration             | rendered structure    | Assert `document.activeElement` matches trigger or `final_focus` after close.                                             |
+| Scroll lock                   | DOM attrs             | Assert body `overflow: hidden` when open, restored when closed.                                                           |
+| Dialog stack and inert        | DOM attrs             | Assert sibling elements have `inert` when drawer is open; removed when closed.                                            |
+| Backdrop dismiss              | callback order        | Assert `CloseOnBackdropClick` fires before `on_open_change(false)`.                                                       |
+| Escape dismiss                | callback order        | Assert `CloseOnEscape` fires before `on_open_change(false)`.                                                              |
+| Drag gesture state            | machine state         | Assert `Dragging(position)` during active drag.                                                                           |
+| Snap resolution               | machine state         | Assert correct snap index after drag end with velocity.                                                                   |
 | DragHandle slider ARIA        | DOM attrs             | Assert `role="slider"`, `tabindex="0"`, accessible name, `aria-valuenow`, `aria-valuemin`, `aria-valuemax` on DragHandle. |
-| `data-ars-dragging`           | DOM attrs             | Assert presence on Content during drag, absence when not dragging.                       |
-| Portal rendering              | rendered structure    | Assert Backdrop and Content are siblings inside the portal root.                         |
-| Cleanup                       | cleanup side effects  | Verify listeners, scroll lock, dialog stack, and z-index are released on unmount.        |
-| Hydration stability           | hydration structure   | Assert Title and Description IDs match between SSR and client.                           |
-| Desktop degradation           | rendered structure    | Assert drawer opens without scroll lock on Desktop target.                               |
+| `data-ars-dragging`           | DOM attrs             | Assert presence on Content during drag, absence when not dragging.                                                        |
+| Portal rendering              | rendered structure    | Assert Backdrop and Content are siblings inside the portal root.                                                          |
+| Cleanup                       | cleanup side effects  | Verify listeners, scroll lock, dialog stack, and z-index are released on unmount.                                         |
+| Hydration stability           | hydration structure   | Assert Title and Description IDs match between SSR and client.                                                            |
+| Desktop degradation           | rendered structure    | Assert drawer opens without scroll lock on Desktop target.                                                                |
 
 Cheap verification recipe:
 

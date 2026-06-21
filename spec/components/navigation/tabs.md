@@ -122,9 +122,9 @@ pub enum ActivationMode {
 pub struct TabRegistration {
     /// Stable identifier. Must be unique within the list.
     pub key: Key,
-    /// When `true`, adapters render a close button inside this tab and
-    /// the agnostic core forwards `Delete` / `Backspace` keystrokes as
-    /// `Event::CloseTab`.
+    /// When `true`, adapters render a pointer close affordance for this
+    /// tab and the agnostic core forwards `Delete` / `Backspace`
+    /// keystrokes as `Event::CloseTab`.
     pub closable: bool,
 }
 ```
@@ -606,6 +606,7 @@ fn non_dir_context_props_changed(old: &Props, new: &Props) -> bool {
         || old.activation_mode != new.activation_mode
         || old.loop_focus != new.loop_focus
         || old.disabled_keys != new.disabled_keys
+        || old.reorderable != new.reorderable
 }
 
 // ── Transition helpers ────────────────────────────────────────────────────────
@@ -732,7 +733,9 @@ fn pick_successor(ctx: &Context, position: usize) -> Option<Key> {
 pub enum Part {
     Root,
     List,
+    Panels,
     Tab { tab_key: Key },
+    TabShell { tab_key: Key },
     TabIndicator,
     Panel { tab_key: Key, tab_label: Option<String> },
     TabCloseTrigger { tab_label: String },
@@ -825,6 +828,22 @@ impl<'a> Api<'a> {
             Orientation::Horizontal => "horizontal",
             Orientation::Vertical   => "vertical",
         });
+        let owns = self.ctx.tabs.iter()
+            .map(|tab_key| self.ctx.ids.item("tab", &dom_safe_key_token(tab_key)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !owns.is_empty() {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Owns), owns);
+        }
+        attrs
+    }
+
+    /// Attrs for the panel collection wrapper.
+    pub fn panels_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Panels.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
         attrs
     }
 
@@ -850,8 +869,8 @@ impl<'a> Api<'a> {
     /// The fallback keeps the tablist reachable via natural Tab
     /// navigation when the consumer renders with no initial selection.
     ///
-    /// When `Props::reorderable` is `true`, also emits
-    /// `aria-roledescription="draggable tab"` (always — see §6.5).
+    /// When `Props::reorderable` is `true`, emits
+    /// `aria-roledescription="draggable tab"` for every tab trigger.
     pub fn tab_attrs(&self, tab_key: &Key, focus_visible: bool) -> AttrMap {
         let mut attrs = AttrMap::new();
         let is_selected = self.is_tab_selected(tab_key);
@@ -880,6 +899,31 @@ impl<'a> Api<'a> {
         if self.props.reorderable {
             attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), "draggable tab");
         }
+        attrs
+    }
+
+    /// Attrs for the presentational shell wrapping a tab trigger and
+    /// its optional close trigger.
+    ///
+    /// `focus_visible` is the adapter-supplied keyboard modality bit.
+    /// The shell mirrors row-level selected, disabled, closable, and
+    /// focus-visible state so the full row can be styled directly.
+    pub fn tab_shell_attrs(&self, tab_key: &Key, focus_visible: bool) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] =
+            Part::TabShell { tab_key: Key::default() }.data_attrs();
+        let is_selected = self.is_tab_selected(tab_key);
+        let is_disabled = is_disabled(self.ctx, tab_key);
+        let is_closable = self.ctx.closable_tabs.contains(tab_key);
+        let is_focused = self.ctx.focused_tab.as_ref() == Some(tab_key);
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Role, "presentation");
+        attrs.set(HtmlAttr::Data("ars-tab-key"), dom_safe_key_token(tab_key));
+        if is_selected { attrs.set_bool(HtmlAttr::Data("ars-selected"), true); }
+        if is_disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
+        if is_closable { attrs.set_bool(HtmlAttr::Data("ars-closable"), true); }
+        if is_focused && focus_visible { attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true); }
         attrs
     }
 
@@ -1018,18 +1062,15 @@ impl<'a> Api<'a> {
         attrs
     }
 
-    /// Attrs for the close button inside a closable tab. Renders
-    /// `type="button"` to inhibit accidental form submission when the
-    /// tabs live inside a `<form>`.
+    /// Attrs for the pointer close affordance inside a closable tab.
     pub fn close_trigger_attrs(&self, tab_label: &str) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::TabCloseTrigger { tab_label: String::new() }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label),
             (self.ctx.messages.close_tab_label)(tab_label, &self.ctx.locale));
-        attrs.set(HtmlAttr::TabIndex, "-1");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs
     }
 
@@ -1097,9 +1138,11 @@ impl ConnectApi for Api<'_> {
             Part::Root => self.root_attrs(),
             Part::List => self.list_attrs(),
             // ConnectApi defaults focus_visible to false; adapters that
-            // want focus-visible call `Api::tab_attrs` directly with the
+            // want focus-visible call `Api::tab_attrs` /
+            // `Api::tab_shell_attrs` directly with the
             // ModalityContext-derived bool.
             Part::Tab { tab_key } => self.tab_attrs(&tab_key, false),
+            Part::TabShell { tab_key } => self.tab_shell_attrs(&tab_key, false),
             Part::TabIndicator => self.tab_indicator_attrs(),
             Part::Panel { tab_key, tab_label } => {
                 self.panel_attrs(&tab_key, tab_label.as_deref())
@@ -1131,16 +1174,19 @@ Tabs
 ├── List                   role="tablist"
 │   ├── Tab (×N)           role="tab"
 │   └── Indicator       animated selection bar
-└── Panel (×N)             role="tabpanel"
+└── Panels
+    └── Panel (×N)         role="tabpanel"
 ```
 
-| Part        | Element                                                                                           | Key Attributes                                                                                                                                                                       |
-| ----------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Root`      | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="root"`, `data-ars-orientation`, `dir`                                                                                                       |
-| `List`      | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="list"`, `id="{props.id}-tablist"` (= `ids.part("tablist")`), `role="tablist"`, `aria-orientation`                                           |
-| `Tab`       | adapter-owned focus target (`<a>` for link tabs; otherwise a role-backed element such as `<div>`) | `data-ars-scope="tabs"`, `data-ars-part="tab"`, DOM-safe key-derived `id`, `role="tab"`, `aria-selected`, `aria-controls`, `tabindex`, `data-ars-selected`, `data-ars-focus-visible` |
-| `Indicator` | `<span>`                                                                                          | `data-ars-scope="tabs"`, `data-ars-part="tab-indicator"`, `aria-hidden="true"`                                                                                                       |
-| `Panel`     | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="panel"`, DOM-safe key-derived `id`, `role="tabpanel"`, `aria-labelledby`, `tabindex="0"`                                                    |
+| Part        | Element                                                                                           | Key Attributes                                                                                                                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`      | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="root"`, `data-ars-orientation`, `dir`                                                                                                                     |
+| `List`      | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="list"`, `id="{props.id}-tablist"` (= `ids.part("tablist")`), `role="tablist"`, `aria-orientation`                                                         |
+| `Panels`    | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="panels"`                                                                                                                                                  |
+| `TabShell`  | presentational `<div>` wrapping one tab trigger and optional close trigger                        | `data-ars-scope="tabs"`, `data-ars-part="tab-shell"`, `role="presentation"`, `data-ars-tab-key`, row-level `data-ars-selected`, `data-ars-disabled`, `data-ars-closable`, `data-ars-focus-visible` |
+| `Tab`       | adapter-owned focus target (`<a>` for link tabs; otherwise a role-backed element such as `<div>`) | `data-ars-scope="tabs"`, `data-ars-part="tab"`, DOM-safe key-derived `id`, `role="tab"`, `aria-selected`, `aria-controls`, `tabindex`, `data-ars-selected`, `data-ars-focus-visible`               |
+| `Indicator` | `<span>`                                                                                          | `data-ars-scope="tabs"`, `data-ars-part="tab-indicator"`, `aria-hidden="true"`                                                                                                                     |
+| `Panel`     | `<div>`                                                                                           | `data-ars-scope="tabs"`, `data-ars-part="panel"`, DOM-safe key-derived `id`, `role="tabpanel"`, `aria-labelledby`, `tabindex="0"`                                                                  |
 
 Every DOM `id` flows from the single `Context::ids: ComponentIds` base
 and keyed tab/panel IDs first convert `Key` values into DOM-safe tokens.
@@ -1153,18 +1199,23 @@ CSS property via
 `PlatformEffects::resolved_direction(&ids.part("tablist"))` before
 dispatching `Event::SetDirection`.
 
-Panel elements remain present so `aria-controls` targets are stable. Panel body rendering follows
-the mount policy from `Props`: when `unmount_on_exit` is `true`, only the selected panel body
-renders; when `lazy_mount` is `true` and `unmount_on_exit` is `false`, the selected panel body and
-any previously selected panel bodies render; otherwise every panel body renders. A newly selected
-lazy panel MUST render its body in the same adapter render that marks it selected.
+Panel elements remain present so `aria-controls` targets are stable. The core-owned
+`should_render_panel_body(...)` predicate defines the renderer-independent body presence policy
+from `Props`: when `unmount_on_exit` is `true`, only the selected panel body renders; when
+`lazy_mount` is `true` and `unmount_on_exit` is `false`, the selected panel body and any previously
+selected panel bodies render; otherwise every panel body renders. A newly selected lazy panel MUST
+render its body in the same adapter render that marks it selected. Adapters own only the renderer
+mechanics that apply this predicate to their view tree.
 
-### 2.1 Indicator Part
+### 2.1 Indicator Anatomy Node
 
-The `tabs::Indicator` part provides an animated sliding selection highlight, identical to
-`ToggleGroup`'s indicator pattern (see [Indicator Part](../utility/toggle.md#indicator-part)). It is
-positioned via CSS custom properties set by the adapter's connect layer based on the
-selected tab's DOM measurements.
+The core `Indicator` anatomy node provides an animated sliding selection
+highlight, identical to `ToggleGroup`'s indicator pattern (see
+[Indicator Part](../utility/toggle.md#indicator-part)). It is positioned via
+CSS custom properties set by the adapter's connect layer based on the selected
+tab's DOM measurements. Adapters may render this node as a private helper when
+public composition would require consumers to pass adapter-owned measurement
+attrs or style state.
 
 **CSS Custom Properties** (set as inline styles on the indicator element):
 
@@ -1296,7 +1347,7 @@ browser `Tab` focus enters the roving tab stop.
 - **Vertical tabs**: `orientation="vertical"` is direction-neutral;
   arrow keys become `ArrowUp` / `ArrowDown` regardless of `dir`.
 - **Messages**: Tab labels are consumer-provided. The `Messages`
-  struct provides the closable-tab close button label
+  struct provides the closable-tab close-affordance label
   (`close_tab_label`) AND the keyboard-reorder LiveAnnouncer template
   (`reorder_announce_label`) — see §5.5.
 
@@ -1364,7 +1415,7 @@ framework state, but they should not duplicate these pure conversions.
 `CloseTab(Key)` is part of the base `Event` enum (see §1.5). It is
 **dispatched by**:
 
-- `Api::on_close_trigger_click(tab_key)` — the close button.
+- `Api::on_close_trigger_click(tab_key)` — the pointer close affordance.
 - `Api::on_tab_keydown` — `Delete` / `Backspace` when
   `Context::closable_tabs.contains(tab_key)`.
 
@@ -1401,23 +1452,29 @@ cleared the only tab without a successor), `Event::SetTabs` /
 ### 5.4 Anatomy Addition
 
 ```text
-Tab
-├── Label
-└── TabCloseTrigger  (non-roving nested control; data-ars-part="tab-close-trigger")
+TabShell  (role="presentation"; data-ars-part="tab-shell")
+├── Tab
+│   └── Label
+└── TabCloseTrigger  (non-roving sibling control; data-ars-part="tab-close-trigger")
 ```
 
-| Part              | Element                                      | Key Attributes                                                                                                            |
-| ----------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `TabCloseTrigger` | Non-tabbable adapter-owned native `<button>` | `data-ars-part="tab-close-trigger"`, `type="button"`, `aria-label=Messages.close_tab_label({tab label})`, `tabindex="-1"` |
+| Part              | Element                                                                                                | Key Attributes                                                                                                                                                                                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TabCloseTrigger` | Non-roving adapter-owned pointer affordance rendered as a sibling of the tab trigger inside `TabShell` | `data-ars-part="tab-close-trigger"`, `aria-label=Messages.close_tab_label({tab label})`, `aria-hidden="true"`; adapters render user-supplied visual content when provided, otherwise a small SVG glyph so the unstyled primitive has a visible close target without CSS pseudo-content |
 
 The kebab-cased `data-ars-part` value is `"tab-close-trigger"` —
 matching the part variant `Part::TabCloseTrigger`. Using the
 `tab-`-prefixed token avoids visual collisions with Dialog's /
 Popover's `close-trigger` data-attribute when downstream stylesheets
-write scope-agnostic selectors. The close trigger renders as a native
-`<button type="button">` so assistive technology receives a real button
-control and forms do not submit accidentally when tabs render inside a
-`<form>` element.
+write scope-agnostic selectors. The close trigger is not a roving or
+tabbable control because ARIA `tablist` ownership only permits tab
+descendants; keyboard users close the focused tab with Delete /
+Backspace on the tab trigger itself.
+
+Adapter `Tab` row data may include optional visual content for the close
+affordance. That content is decorative and does not transfer ownership of
+the close element, accessible label, event handling, or close policy to
+the consumer.
 
 ### 5.5 Messages
 
@@ -1470,8 +1527,9 @@ When `true`:
 
 - The agnostic core listens for `Ctrl+Arrow` keystrokes on the
   orientation axis and dispatches `Event::ReorderTab`.
-- `Api::tab_attrs` always emits `aria-roledescription="draggable tab"`
-  (see §6.5 — always-on, NOT only during drag).
+- `Api::tab_attrs` emits `aria-roledescription="draggable tab"` for
+  every tab trigger while `Props::reorderable` is true (see §6.5 —
+  present throughout the reorderable state, NOT only during drag).
 
 ### 6.2 Additional Event for reorderable tabs
 
@@ -1481,13 +1539,18 @@ enum (see §1.5).
 ### 6.3 Behavior for reorderable tabs
 
 - **Drag and Drop is adapter-only.** Pointer-driven drag interaction
-  (drag sources, drop targets, drop indicators, ghost previews) lives
+  (drag sources, drop targets, drop indicators, custom drag images) lives
   entirely in the framework adapter using its native drag
-  infrastructure (`web_sys::DragEvent` + `Element::set_draggable` for
-  the web). The agnostic core does not model drag state at all. On
-  drop, the adapter computes a drag reorder plan from the current
-  `TabMeta<K>` slice, then dispatches `Event::ReorderTab` with the
-  dragged tab key and computed new index.
+  infrastructure (`web_sys::DragEvent` + the `draggable` attribute for
+  the web). The public `TabShell` is the browser drag source and drop
+  target so the whole row, including any close affordance area, is a
+  single drag surface. The custom drag image clones that public
+  `TabShell` anatomy so the preview represents the dragged tab and
+  adjacent close affordance without requiring widget-local preview
+  policy. The agnostic core does not model drag state at all. On drop,
+  the adapter computes a drag
+  reorder plan from the current `TabMeta<K>` slice, then dispatches
+  `Event::ReorderTab` with the dragged tab key and computed new index.
 - **Keyboard**: `Ctrl+ArrowRight` / `Ctrl+ArrowLeft` (horizontal) or
   `Ctrl+ArrowDown` / `Ctrl+ArrowUp` (vertical) move the focused tab
   one position in that direction along the orientation axis. The
@@ -1515,11 +1578,11 @@ direction.
 ### 6.5 Accessibility
 
 - Whenever `Props::reorderable` is `true`, every tab trigger emits
-  `aria-roledescription="draggable tab"` (always-on, not only during
-  drag). This way screen-reader users discover the keyboard reorder
-  affordance on first focus rather than only after a drag has
-  started. (Note: `aria-grabbed` is deprecated in ARIA 1.1 and MUST
-  NOT be used.)
+  `aria-roledescription="draggable tab"` throughout the reorderable
+  state, not only during active drag. This way screen-reader users
+  discover the keyboard reorder affordance on first focus rather than
+  only after a drag has started. (Note: `aria-grabbed` is deprecated in
+  ARIA 1.1 and MUST NOT be used.)
 - Drop indicators are not focusable and are hidden from the
   accessibility tree.
 - After a keyboard reorder, the adapter announces the new position
@@ -1590,11 +1653,12 @@ announcing is an adapter concern — but the message function is on
 | --------------- | -------------- | ----------- | --------- | ----------- | ---------------------------------------- |
 | Root            | `Root`         | `Root`      | `Root`    | `Tabs`      | Full match                               |
 | Tab list        | `List`         | `List`      | `List`    | `TabList`   | Full match                               |
+| Panel container | `Panels`       | --          | --        | `TabPanels` | Public wrapper for panel layout          |
+| Tab shell       | `TabShell`     | --          | --        | --          | Presentational wrapper for close trigger |
 | Tab trigger     | `Tab`          | `Trigger`   | `Trigger` | `Tab`       | Full match                               |
 | Content panel   | `Panel`        | `Content`   | `Content` | `TabPanel`  | Full match                               |
 | Indicator       | `TabIndicator` | `Indicator` | --        | --          | Ark and ars-ui have this                 |
 | Close trigger   | `CloseTrigger` | --          | --        | --          | ars-ui closable variant                  |
-| Panel container | --             | --          | --        | `TabPanels` | React Aria wrapper; not needed in ars-ui |
 
 **Gaps:** None.
 

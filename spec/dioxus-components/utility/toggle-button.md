@@ -227,7 +227,7 @@ pub struct ToggleButtonSketchProps {
 pub fn ToggleButton(props: ToggleButtonSketchProps) -> Element {
     let machine = use_machine::<toggle_button::Machine>(toggle_button::Props::default());
     let root_attrs = machine.derive(|api| api.part_attrs(toggle_button::Part::Root));
-    rsx! { button { ..root_attrs.read().clone(), {props.children} } }
+    rsx! { button { ..root_attrs.cloned(), {props.children} } }
 }
 ```
 

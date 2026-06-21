@@ -37,6 +37,12 @@ Cover:
 - fallback structural part behavior, including the guarantee that an explicit
   public part suppresses the adapter fallback when only one semantic node may
   exist;
+- typed collection renderer overrides, when present, proving render callbacks
+  receive typed item context from the root collection and consumers do not
+  manually repeat or stringify item keys;
+- private behavior-critical helper boundaries, when a planned or visible
+  anatomy node intentionally remains private, proving stale public symbols do
+  not remain exported or documented;
 - empty state and loading sentinel output where supported.
 
 For each public stylable part, include at least one focused SSR/unit assertion
@@ -88,11 +94,26 @@ about full user workflows, styled example parity, computed visual feedback,
 cross-adapter UX comparison, axe across reached states, or reference-outcome
 coverage, put it in E2E/widget/browser parity evidence instead.
 
+For draggable or clickable compound components, browser parity evidence should
+include computed cursor checks when the cursor communicates behavior. Verify
+the idle cursor on the public shell and visible interactive children, then
+verify the active drag state after the component exposes its dragging marker.
+Screenshots alone are not enough for this class of regression because browser
+cursor changes are not captured reliably in static images.
+
 For form controls, adapter tests must include composition scenarios with
 `Form` and `Fieldset`. SSR/unit tests should assert merged disabled, readonly,
 invalid, validation-error, description, and error IDREF output. Wasm tests
 should assert submit/reset behavior, DOM checked/value properties, and state
 updates after validation changes.
+
+For collection-backed components that render child components per item, add
+browser-backed regressions for semantic identity whenever reorder, insert, or
+remove is supported. Dioxus tests should prove component-local state, mounted
+refs, lazy panel state, or focus restoration follows the item key after a
+reorder; a key on an inner DOM node is not enough evidence. Leptos tests should
+prove keyed `For` output preserves the intended item identity across the same
+operation.
 
 Prefer `ars-test-harness-leptos`, `ars-test-harness-dioxus`, and shared
 `ars-test-harness` helpers instead of bespoke browser scaffolding.

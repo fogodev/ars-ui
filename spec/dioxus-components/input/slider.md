@@ -190,12 +190,12 @@ Dioxus should use mounted-node measurement on hosts that support it, isolate hos
 let machine = use_machine::<slider::Machine>(props);
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        div { ..machine.derive(|api| api.track_attrs()).read().clone(),
-            div { ..machine.derive(|api| api.range_attrs()).read().clone() }
-            div { ..machine.derive(|api| api.thumb_attrs()).read().clone() }
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
+        div { ..machine.derive(|api| api.track_attrs()).cloned(),
+            div { ..machine.derive(|api| api.range_attrs()).cloned() }
+            div { ..machine.derive(|api| api.thumb_attrs()).cloned() }
         }
-        input { ..machine.derive(|api| api.hidden_input_attrs()).read().clone() }
+        input { ..machine.derive(|api| api.hidden_input_attrs()).cloned() }
     }
 }
 ```

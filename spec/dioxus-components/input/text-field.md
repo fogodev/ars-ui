@@ -194,16 +194,16 @@ Dioxus should keep the native input in a mounted node path that can still expose
 let machine = use_machine::<text_field::Machine>(props);
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        label { ..machine.derive(|api| api.label_attrs()).read().clone(), {children} }
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
+        label { ..machine.derive(|api| api.label_attrs()).cloned(), {children} }
         input {
-            ..machine.derive(|api| api.input_attrs()).read().clone(),
+            ..machine.derive(|api| api.input_attrs()).cloned(),
             oninput: move |ev| send_input(ev, &machine),
             oncompositionstart: move |_| machine.send.call(text_field::Event::CompositionStart),
             oncompositionend: move |_| machine.send.call(text_field::Event::CompositionEnd),
         }
         if show_clear(&machine) {
-            button { ..machine.derive(|api| api.clear_trigger_attrs()).read().clone() }
+            button { ..machine.derive(|api| api.clear_trigger_attrs()).cloned() }
         }
     }
 }

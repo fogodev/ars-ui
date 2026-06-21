@@ -8,7 +8,7 @@ mod selection;
 mod specialized;
 mod utility;
 
-use ars_leptos::navigation::tabs::{Tab, Tabs};
+use ars_leptos_components::navigation::tabs::css::{STYLES as TABS_STYLE, Tab, Tabs};
 use leptos::prelude::*;
 
 use crate::text::CategoryTab;
@@ -16,6 +16,7 @@ use crate::text::CategoryTab;
 #[component]
 pub(crate) fn CategoryTabs() -> impl IntoView {
     view! {
+        <style>{TABS_STYLE}</style>
         <Tabs
             default_value=CategoryTab::Utility
             tabs=[

@@ -1,6 +1,6 @@
 ---
 source: crates/ars-components/src/navigation/tabs/tests.rs
-assertion_line: 831
+assertion_line: 1027
 expression: "snapshot_attrs(&service.connect(&|_| {}).close_trigger_attrs(\"Drafts\"))"
 ---
 AttrMap {
@@ -23,22 +23,18 @@ AttrMap {
         ),
         (
             Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
                 Label,
             ),
             String(
                 "Dismiss Drafts",
-            ),
-        ),
-        (
-            TabIndex,
-            String(
-                "-1",
-            ),
-        ),
-        (
-            Type,
-            String(
-                "button",
             ),
         ),
     ],

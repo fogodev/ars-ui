@@ -46,6 +46,18 @@ pub use ars_collections::selection::{
 Do not put machine internals, slot output internals, adapter hooks, or
 component-author-only helpers in the end-user prelude.
 
+Do not flatten component parts into the end-user prelude. Re-export the
+component module and require namespace-qualified parts such as `tabs::Root`,
+`tabs::List`, `checkbox::Root`, or `field::Label`. This keeps part names from
+different component families from colliding and makes examples show the same
+compound-component boundary that users should keep in application code.
+Tests must follow the same rule. Import the component module (`navigation::tabs`
+or `input::checkbox`) and refer to every adapter part, row helper, renderer
+type, and collection source through that module (`tabs::Root`, `tabs::Tab`,
+`tabs::TabRenderItem`, `tabs::TabsSource`). Do not import part names directly in
+test files, even when the local file only covers one component; direct imports
+hide future name collisions.
+
 Low-level adapter primitive roots are named `Root` inside the component module,
 matching the Checkbox standard. Prefer `field::Root`, `fieldset::Root`,
 `form::Root`, and `checkbox::Root` over semantic root names such as `Field`,
@@ -154,10 +166,127 @@ make an explicit public styling decision:
 - record private exceptions in the adapter spec with the reason and the
   supported styling alternative, such as stable `data-ars-*` selectors.
 
+Core anatomy does not automatically imply a standalone public adapter
+component. A node may be a required `Part` / anatomy node, rendered by the
+adapter with stable attrs, and still remain private when exposing it would make
+callers pass adapter-owned refs, event wiring, measurement styles, or raw
+converted attrs. Adapter specs should name these as "anatomy nodes" or
+"internal nodes" rather than listing them in the public component API.
+
 Hidden or infrastructure-oriented nodes are not automatically exempt. Status
 regions, live regions, hidden inputs, portals, anchors, overlay layers, and
 measurement wrappers still need the same decision. Some of them should remain
 private, but the decision must be documented instead of assumed.
+
+Visible nodes are not automatically safe public parts either. If splitting a
+node out would make consumers responsible for behavior that belongs to the
+adapter or agnostic machine, keep that behavior-critical subpart inside a
+larger public part and document the boundary. Examples include triggers that
+own roving focus, keyboard dispatch, DOM refs, ARIA relationships, drag/drop
+wiring, or close affordance event handling. In those cases, expose the nearest
+safe public part, provide stable `data-ars-part` / state selectors, and offer a
+semantic customization prop or typed renderer for purely visual content. Do
+not publish a standalone part that looks composable but silently requires
+consumers to rebuild component-owned policy.
+
+When the supported styling path for a private behavior-critical subpart is
+selector-based, document that path concretely in the adapter spec. Include the
+exact `data-ars-part` names and at least one Tailwind arbitrary-variant example
+showing where classes should be attached, for example on `List`, `Root`, or a
+larger public part. Also name any visual-content hook, such as a
+`close_trigger` glyph/content prop, and state that it customizes only content,
+not the wrapper semantics or event policy.
+
+Raw adapter attr props are a public-API smell. A Leptos component that accepts
+`Vec<LeptosAttribute>`, or a Dioxus component/helper that accepts raw
+`Vec<Attribute>` without `#[props(extends = GlobalAttributes)]`, is usually an
+internal renderer helper. Keep it private, or redesign it to read context and
+expose normal consumer styling (`class` / `style` in Leptos,
+`GlobalAttributes` in Dioxus).
+
+### Typed Collection Renderers
+
+Collection-backed components must keep one semantic source of item order. The
+root primitive should receive the typed collection source, and collection
+parts should iterate that source instead of asking consumers to repeat keys in
+child markup.
+
+Put typed collection render callbacks on the primitive that owns the typed
+collection source unless there is a stronger ergonomic reason not to. When
+styling requires public per-row anatomy, it is acceptable for collection parts
+to be generic and own the renderer props, as with `tabs::List<K> { tab_row: … }`
+and `tabs::Panels<K> { panel: … }`. That trades default-call inference for
+direct composition of public parts; every default call site must then spell the
+key type explicitly. Document that tradeoff in the adapter spec.
+
+When consumers need custom per-item anatomy, prefer typed render callbacks
+that receive an item render context selected from the root collection:
+
+```rust,no_check
+pub struct ItemRenderItem<K: ItemKey> {
+    pub item: Item<K>,
+}
+```
+
+The callback may wrap or arrange public adapter parts, but it must not
+recompute selection, disabled state, keyboard policy, ARIA relationships,
+drag/drop placement, or localized component messages. If the renderer needs
+extra state, add an agnostic render-state helper first and pass that state
+through both adapters.
+
+When a typed row shell owns a row item and renders smaller child parts, prefer
+having the shell publish the row item through typed framework context and make
+the child parts read that context. This keeps examples and source templates
+focused on anatomy instead of repeated `item.clone()` plumbing. It is fine for
+the child parts to require an explicit key generic, such as
+`Trigger<SettingsTab>` or `Trigger::<SettingsTab>`, when Rust cannot infer the
+type after the item prop is removed. Keep a test proving those child parts
+resolve the row from the shell context and still receive the correct labels,
+ids, state attributes, and event wiring.
+
+For Dioxus, the usual shape is:
+
+```rust,no_check
+#[props(optional)]
+pub render_item: Option<Callback<ItemRenderItem<K>, Element>>;
+```
+
+For Leptos, prefer a small public wrapper around a cloneable callback when the
+`view!` macro or `leptosfmt` makes inline typed closure props brittle:
+
+```rust,no_check
+#[derive(Clone)]
+pub struct ItemRenderer<K: ItemKey>(/* private */);
+
+impl<K, F, V> From<F> for ItemRenderer<K>
+where
+    K: ItemKey,
+    F: Fn(ItemRenderItem<K>) -> V + Send + Sync + 'static,
+    V: IntoView + 'static,
+{
+    /* ... */
+}
+```
+
+Use local renderer values in examples and tests when the closure has an
+explicit item type:
+
+```rust,no_check
+let render_item = ItemRenderer::from(|item: ItemRenderItem<MyKey>| {
+    view! { <items::ItemShell item=item /> }
+});
+
+view! {
+    <items::Root items render_item=render_item>
+        <items::List />
+    </items::Root>
+}
+```
+
+Put renderer props on the root when that preserves key-type inference for the
+plain collection parts (`<items::List/>`, `<items::Panels/>`, `items::List {}`,
+`items::Panels {}`). Use generic collection parts only when the framework can
+infer the key type ergonomically and formatter-safe call sites remain clear.
 
 ### Required Structural Parts And Fallbacks
 
@@ -194,6 +323,11 @@ internal parts. If a demo cannot be written without raw CSS or private
 anatomy, promote the needed primitive part or add the styled wrapper to
 `ars-*-components` first.
 
+For private subparts that deliberately remain internal, Tailwind examples may
+target their stable `data-ars-part` attrs from a safe public ancestor. Keep the
+selector local to the component root/list/panel and do not use this as an
+excuse to rebuild component behavior in example code.
+
 ### Styled Source Templates
 
 Use `ars-leptos-components` and `ars-dioxus-components` for checked-in
@@ -222,12 +356,47 @@ add top-level variant-first module trees such as `css::checkbox` or
 `tailwind::checkbox`. Those crates are source-template staging areas for the
 future installer, so category-first paths should be the only public shape.
 
-Tailwind source templates should keep class strings inline on the rendered
+Tailwind source templates must keep class strings inline on the rendered
 elements instead of hiding them behind `const` identifiers. Inline strings make
 the copied component source easier to edit and allow Tailwind-aware editor
 extensions to provide completion, hover, and class validation at the exact
 markup location. Use helper functions only for semantic logic; do not move
 ordinary Tailwind class lists out of the component markup.
+
+Tailwind variants must be fully styleable by editing the copied component
+source. Do not require users to add component-specific rules to a separate
+`tailwind.css` file to reach supported visual states. If a Tailwind template
+needs to style an outer public part based on inner component state, promote
+that renderer-independent state to agnostic `data-ars-*` attrs on the public
+part first, then consume those attrs with direct Tailwind variants such as
+`data-ars-selected:...`, `data-ars-focus-visible:...`, or
+`group-data-ars-selected:...`. Reserve bracketed data variants such as
+`data-[size=large]:...` for value checks, and reserve scoped arbitrary variants
+for custom selectors that the named variants cannot express. External CSS is
+acceptable only for the CSS variant, global app chrome, or truly
+application-owned styling. When editing Tailwind component templates or
+widgets, follow `.agents/skills/tailwind-v4/SKILL.md` and run its warning
+sweeps before handoff.
+
+Styled widget crates (`examples/widgets-*-css` and
+`examples/widgets-*-tailwind`) must consume the high-level styled components
+from `ars-*-components`, not manually compose the low-level adapter parts.
+Those galleries prove the ready-made CSS/Tailwind source-template experience.
+Only the unstyled widget crates (`examples/widgets-leptos` and
+`examples/widgets-dioxus`) should demonstrate direct primitive composition with
+adapter parts such as `Root`, `List`, `TabShell`, `Trigger`, `CloseTrigger`,
+`Panels`, and `Panel`. Adapter tests and E2E fixtures still cover the
+low-level primitives directly.
+
+For draggable compound parts, cursor state is part of the visual contract.
+The same rest cursor should apply to the drag source and every visible
+interactive child inside it, and the active drag cursor must override child
+cursors. In Tailwind templates, put `cursor-pointer` on clickable shells and
+children, `data-ars-dragging:cursor-grabbing` on the state-owning shell, and
+`group-data-ars-dragging:cursor-grabbing` on child parts whose own cursor
+rules would otherwise win. Use `data-ars-disabled:cursor-not-allowed` /
+`aria-disabled:cursor-not-allowed` for disabled states rather than leaving a
+clickable cursor on disabled controls.
 
 Styled source templates may expose semantic props and root-level customization
 (`class`/`style` for Leptos, `GlobalAttributes` for Dioxus), but they should
@@ -257,13 +426,13 @@ the user-facing item from the adapter prelude first and then consume it from
 there. This keeps installed components easy to paste into ordinary
 applications with one adapter dependency and one predictable import.
 
-Plain widgets (`examples/widgets-leptos` and `examples/widgets-dioxus`) should
+Plain widgets (`examples/widgets-leptos` and `examples/widgets-dioxus`) must
 demonstrate the unstyled adapter primitives directly. They are the reference
-for component anatomy and primitive composition, not visual polish. CSS widgets
-should import the CSS styled source templates from `ars-*-components`, and
-Tailwind widgets should import the Tailwind styled source templates. Do not use
-the CSS styled component in the plain widget just to make it look better; that
-blurs the primitive/styled-source boundary.
+for component anatomy and primitive composition, not visual polish. Never import
+`ars-leptos-components` or `ars-dioxus-components` from a plain widget just
+because a styled template exists. CSS widgets must import the CSS styled source
+templates from `ars-*-components`, and Tailwind widgets must import the Tailwind
+styled source templates.
 
 When a merge helper needs to inspect an existing `AttrMap` value and then
 overwrite that same key, use `AttrMap::take()` instead of `get()` plus a clone.

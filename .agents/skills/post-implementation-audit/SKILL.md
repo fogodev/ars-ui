@@ -103,11 +103,20 @@ The canonical entry-prompt (one per round):
 This is a non-exhaustive checklist. Each round, walk through it explicitly:
 
 - **Adapter specs** at `spec/leptos-components/<category>/<component>.md` and `spec/dioxus-components/<category>/<component>.md` — do they describe the new core surface accurately? Are their canonical implementation sketches up-to-date with the actual `Api` / function signatures? Do they reference the right helper methods (e.g., `Api::root_attrs()`) instead of hardcoded data attribute strings?
+- **Plan-vs-final contract drift** — did the implementation intentionally
+  choose a better public shape than the original plan or issue text? If so,
+  verify the specs and sketch name the final contract, mark the old conclusion
+  as superseded, and add tests for the supported path. Do not leave a plan
+  promising public parts, renderers, fallback behavior, or styled wrappers that
+  the final implementation deliberately replaced with a safer boundary.
 - **Adapter parity workflow** at `docs/implementation/adapter-component-delivery.md` and linked files — for adapter component work, did the task produce and update a reference-exploration sketch, outcome matrix, browser evidence, widgets evidence, i18n/a11y mapping, and parity audit loop?
 - **Retrofit audit workflow** — if the task updates an older adapter component
   to current conventions, did it create a fresh audit issue, compare against
   the current gold-standard component, refresh old browser/E2E evidence, and
-  run stale-symbol scans for any public primitive rename?
+  run stale-symbol scans for any public primitive rename? If the retrofit
+  removes a closed adapter component, did ready-made visual usage move to
+  `ars-*-components`, did primitive fixtures still prove direct adapter
+  composition, and did the adapter prelude stop exporting the closed wrapper?
 - **Adapter feature wiring** in `crates/ars-leptos/Cargo.toml` and `crates/ars-dioxus/Cargo.toml` — does the adapter's `icu4x` / `web-intl` feature need to enable any new `ars-components/<feature>` flag for the new code to be reachable?
 - **Adapter `prelude.rs`** — does the new public API need to flow through? (Only if an adapter wrapper exists for the new component; if not, defer to the adapter task.)
 - **Dioxus Rules of Hooks** — if any changed file is under `crates/ars-dioxus/src`, verify hooks run in a stable top-level order. Do not hide hooks in `unwrap_or_else`, `map_or_else`, conditionals, loops, iterator adapters, nested closures, or early-return branches. Run the fallback-hook probe against the changed Dioxus files, not the whole crate:
@@ -122,6 +131,13 @@ This is a non-exhaustive checklist. Each round, walk through it explicitly:
     let generated_id = use_stable_id("field");
     let id = props.id.unwrap_or(generated_id);
     ```
+
+- **Dioxus keyed collection components** — if changed Dioxus code renders
+  stateful components inside an iterator, verify the stable key is on the
+  component invocation itself, not only on an inner DOM node. Add or keep a
+  browser-backed regression proving component-local state, refs, focus, lazy
+  panel state, or drag/drop data follows the semantic item key after reorder,
+  insert, or remove.
 
 - **Target capability classification** — if the changed adapter code uses a
   browser-owned API or semantic such as constraint validation, focus,
@@ -145,6 +161,34 @@ This is a non-exhaustive checklist. Each round, walk through it explicitly:
   `TextProp` class/style until a broader Leptos global-attrs surface exists.
   Tailwind widget examples must style those public parts or use Tailwind
   arbitrary variants over `data-ars-*` anatomy, not raw Rust string CSS.
+- **Raw attr helper visibility** — if a Leptos component accepts
+  `Vec<LeptosAttribute>`, or a Dioxus component/helper accepts raw
+  `Vec<Attribute>` without `GlobalAttributes`, treat it as internal renderer
+  plumbing unless the spec gives a concrete public reason. Public stylable parts
+  should read context and expose normal consumer attrs; raw-attr helpers should
+  be private or redesigned.
+- **Behavior-critical subparts** — for every visible adapter-rendered node kept
+  private, verify the spec says why exposing it as a standalone part would
+  duplicate component-owned behavior, and names the supported styling or
+  visual-customization path. Accept private trigger/close/drag internals only
+  when the adapter still exposes a safe larger part, stable anatomy attrs, a
+  semantic visual-content prop, or a typed renderer that keeps behavior
+  adapter-owned.
+- **Anatomy node vs public component** — verify adapter specs distinguish core
+  anatomy nodes from public adapter components. A core `Part` can be rendered
+  and styleable through `data-ars-part` without being a public component; do not
+  leave public API snippets listing internal measurement, trigger, close, or
+  raw-attr helpers.
+- **Typed collection renderers** — for collection-backed components with custom
+  anatomy hooks, verify renderers receive typed item context from the root
+  collection source and consumers do not repeat key order manually. Leptos
+  renderers should have formatter-safe call sites, usually through a small
+  wrapper type, when inline typed closure props are brittle under `leptosfmt`.
+  Dioxus renderers should use `Callback<ItemRenderItem<K>, Element>` or an
+  equally typed shape. Prefer putting renderers on the primitive that owns the
+  typed collection source when that preserves key-type inference, then invoke
+  them from collection parts through context. Both adapters need SSR/unit tests
+  proving the renderer receives typed items from the single collection source.
 - **Styled source-template boundary** — verify checked-in closed-anatomy styled
   component templates live in `ars-leptos-components` /
   `ars-dioxus-components`, not in `ars-leptos` / `ars-dioxus`. Adapter crates
@@ -166,6 +210,17 @@ This is a non-exhaustive checklist. Each round, walk through it explicitly:
   class strings inline in the rendered `view!` / `rsx!` markup rather than
   hiding them behind `const` identifiers. Inline classes preserve copied-source
   editability and Tailwind-aware editor completion/canonical diagnostics.
+  Tailwind variants must be fully styleable by editing those component class
+  strings; do not accept component-specific selectors in an external
+  `tailwind.css` file as the only way to reach supported states. If an outer
+  public part needs selected, disabled, focus-visible, open, checked, closable,
+  or similar state for styling, the agnostic API should mirror that state as
+  `data-ars-*` attrs on that part and the Tailwind template should consume it
+  with Tailwind v4's canonical presence-data variants, such as
+  `data-ars-selected:...`, `data-ars-focus-visible:...`, and
+  `group-data-ars-selected:...`. Reserve bracketed variants for value checks or
+  real custom selectors. When this audit touches Tailwind classes, read and
+  follow `.agents/skills/tailwind-v4/SKILL.md`, including its warning sweeps.
 - **Styled template import boundary** — verify copied-source styled template
   Rust files import only `ars_leptos::prelude::*` or
   `ars_dioxus::prelude::*`. Do not accept direct imports from `leptos`,
@@ -189,6 +244,15 @@ This is a non-exhaustive checklist. Each round, walk through it explicitly:
   rendering/framework glue with a concrete reason. Adapter-local extension
   traits over agnostic `Api`, `Props`, `State`, or `Event` are drift; add the
   method to the agnostic API instead.
+- **Adapter AttrMap ownership** — grep changed adapter files for
+  `AttrMap::new`, `.set(...)`, `.set_bool(...)`, and local reads of component
+  row metadata or props that drive `data-ars-*`, ARIA, `hidden`, `role`,
+  `tabindex`, id relationship, disabled/readonly/selected, validation, or
+  collection-order attrs. The adapter may make core attrs reactive or merge
+  consumer styling attrs, but the semantic key/value decision must come from
+  the agnostic `Api`. If a wrapper is a public part, add a core `Part` variant
+  plus `Api::*_attrs()` instead of stamping `data-ars-scope` /
+  `data-ars-part` locally.
 - **E2E blocker classification** — if an E2E command failed, verify the result
   is classified as `ComponentAssertionFailed`, `HarnessSetupFailed`, or
   `EvidenceMissing`. Only reached component assertions count as component
@@ -375,6 +439,9 @@ Complete at least three passes:
    when omitted and must prove that explicit parts suppress the fallback so only
    one semantic node exists. Treat missing part exposure, missing fallback
    suppression, or undocumented private structural nodes as adapter API gaps.
+   If a planned or previously public part is intentionally kept private, require
+   a stale-symbol scan and a focused regression proving stale public symbols do
+   not remain exported or documented.
    For Leptos adapters, user-facing semantic text props that can update with
    locale or application state should flow as `TextProp`; the public `t(...)`
    helper returns `Memo<String>` and should be accepted directly through

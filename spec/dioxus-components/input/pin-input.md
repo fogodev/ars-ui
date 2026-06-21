@@ -184,11 +184,11 @@ Dioxus should keep cell refs in a stable indexed collection, use native `input` 
 let machine = use_machine::<pin_input::Machine>(props);
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
         for index in cell_indexes {
-            input { ..machine.derive(|api| api.input_attrs(index)).read().clone() }
+            input { ..machine.derive(|api| api.input_attrs(index)).cloned() }
         }
-        input { ..machine.derive(|api| api.hidden_input_attrs()).read().clone() }
+        input { ..machine.derive(|api| api.hidden_input_attrs()).cloned() }
     }
 }
 ```

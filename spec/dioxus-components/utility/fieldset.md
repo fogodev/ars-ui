@@ -265,7 +265,7 @@ pub fn Root(props: FieldsetSketchProps) -> Element {
 
     rsx! {
         fieldset {
-            ..root_attrs.read().clone(),
+            ..root_attrs.cloned(),
             {props.children}
         }
     }

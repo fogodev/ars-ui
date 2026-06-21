@@ -244,7 +244,7 @@ pub fn Portal(props: PortalProps) -> Element {
         }
     });
 
-    use_drop(move || remove_portal_root(mount_root.read().clone()));
+    use_drop(move || remove_portal_root(mount_root.cloned()));
 
     if render_inline() {
         rsx! { {props.children} }

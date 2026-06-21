@@ -1,11 +1,11 @@
 //! Dioxus Tabs adapter.
 //!
 //! Renders the framework-agnostic [`ars_components::navigation::tabs`]
-//! machine as a single compound `<Tabs>` Dioxus component. The adapter
-//! owns the full anatomy (Root, List, Tab×N, Indicator, Panel×N, optional
-//! CloseTrigger, optional reorder live region), drives DOM focus on the
-//! [`Effect::FocusFocusedTab`] intent emitted by the core, and surfaces
-//! tab data through a per-row [`Tab`] value.
+//! machine as unstyled Dioxus primitives. [`Root`] owns machine setup and
+//! typed collection state; [`List`] and [`Panels`] iterate that collection;
+//! [`TabShell`], [`Trigger`], [`CloseTrigger`], [`Panel`], and [`LiveRegion`]
+//! expose public anatomy while the adapter keeps keyboard, close, reorder,
+//! ARIA, focus, drag-image behavior, and indicator measurement centralized.
 //!
 //! See `spec/dioxus-components/navigation/tabs.md` for the full adapter
 //! contract.
@@ -15,6 +15,7 @@ use std::cell::{Cell, RefCell};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug},
+    marker::PhantomData,
     rc::Rc,
     sync::Arc,
 };
@@ -38,12 +39,12 @@ pub use ars_components::navigation::tabs::{
     ReorderEvent, State,
 };
 use ars_core::{
-    AriaAttr, AttrValue, Direction, HtmlAttr, KeyModifiers, ModalityContext, Orientation,
+    AriaAttr, AttrMap, Direction, HtmlAttr, KeyModifiers, ModalityContext, Orientation,
     PlatformEffects, PointerType, SafeUrl,
 };
 use ars_i18n::Translate;
 use ars_interactions::{KeyboardEventData, KeyboardKey};
-use dioxus::{events::MountedData, prelude::*};
+use dioxus::{dioxus_core::try_consume_context, events::MountedData, prelude::*};
 pub use dioxus_stores::ReadStore;
 use dioxus_stores::{Store, use_store};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -68,7 +69,7 @@ use crate::{
 
 /// Semantic text source for a Dioxus [`Tab`] trigger.
 ///
-/// The adapter uses this label for accessible close-button names and
+/// The adapter uses this label for close-affordance labels and
 /// reorder announcements. The default trigger rendering also uses this
 /// label unless [`Tab::trigger`] supplies richer visual content.
 #[derive(Clone)]
@@ -133,9 +134,9 @@ fn TabLabelText(label_text: TabLabel) -> Element {
 /// The agnostic core does not own per-tab labels (see
 /// `spec/components/navigation/tabs.md` §5.1) — it tracks only registration
 /// keys and the closable flag. Adapters introduce a `Tab` value to
-/// carry the rendered button/panel content, plus optional consumer
+/// carry the rendered trigger/panel content, plus optional consumer
 /// affordances (per-row `disabled` flag, optional `link` for tabs that
-/// render as `<a>` instead of `<button>`).
+/// render as `<a>` instead of the default role-backed trigger element).
 #[derive(Clone, PartialEq)]
 pub struct Tab<K: TabKey> {
     /// Stable identifier for the tab. Used for ARIA wiring, registration,
@@ -145,8 +146,8 @@ pub struct Tab<K: TabKey> {
     /// Visible label content rendered inside the tab trigger.
     pub label: Element,
 
-    /// Semantic label text source. Used for the close-button accessible
-    /// name (`Messages::close_tab_label`) and the reorder announcement
+    /// Semantic label text source. Used for the close-affordance label
+    /// (`Messages::close_tab_label`) and the reorder announcement
     /// (`Messages::reorder_announce_label`).
     pub label_text: TabLabel,
 
@@ -157,13 +158,19 @@ pub struct Tab<K: TabKey> {
     /// `disabled_keys` prop before being threaded to the core machine.
     pub disabled: bool,
 
-    /// When `true` the adapter renders a close button inside the tab and
+    /// When `true` the adapter renders a close affordance for the tab and
     /// the core forwards `Delete` / `Backspace` keystrokes as
     /// [`tabs::Event::CloseTab`].
     pub closable: bool,
 
+    /// Optional visual content rendered inside the adapter-owned close
+    /// affordance. The adapter still owns the close semantics, accessible
+    /// label, and event handling; this content is only the visible glyph or
+    /// decoration. When omitted, the adapter renders a small default glyph.
+    pub close_trigger: Option<Element>,
+
     /// When `Some`, the tab renders as `<a href=…>` instead of the
-    /// default `<button>`.
+    /// default role-backed trigger element.
     pub link: Option<SafeUrl>,
 }
 
@@ -182,6 +189,7 @@ impl<K: TabKey> Tab<K> {
             panel,
             disabled: false,
             closable: false,
+            close_trigger: None,
             link: None,
         }
     }
@@ -202,6 +210,7 @@ impl<K: TabKey> Tab<K> {
             panel,
             disabled: false,
             closable: false,
+            close_trigger: None,
             link: None,
         }
     }
@@ -227,6 +236,17 @@ impl<K: TabKey> Tab<K> {
     #[must_use]
     pub const fn closable(mut self, closable: bool) -> Self {
         self.closable = closable;
+
+        self
+    }
+
+    /// Replaces the default visible close glyph for this tab.
+    ///
+    /// The adapter-owned close affordance still provides the accessible
+    /// label, click handling, and relationship to the Tabs state machine.
+    #[must_use]
+    pub fn close_trigger(mut self, close_trigger: Element) -> Self {
+        self.close_trigger = Some(close_trigger);
 
         self
     }
@@ -259,6 +279,7 @@ where
             panel,
             disabled: false,
             closable: false,
+            close_trigger: None,
             link: None,
         }
     }
@@ -271,6 +292,7 @@ impl<K: TabKey> Debug for Tab<K> {
             .field("label_text", &self.label_text.resolve())
             .field("disabled", &self.disabled)
             .field("closable", &self.closable)
+            .field("close_trigger", &self.close_trigger.is_some())
             .field("link", &self.link)
             .finish_non_exhaustive()
     }
@@ -282,7 +304,7 @@ impl<K: TabKey> Debug for Tab<K> {
 
 /// Props for the Dioxus [`Tabs`] component.
 #[derive(Props, Clone, PartialEq)]
-pub struct TabsProps<K: TabKey> {
+pub struct RootProps<K: TabKey> {
     /// Controlled selected tab key. The outer `Option` distinguishes
     /// controlled-vs-uncontrolled mode (fixed at mount); the inner
     /// `Option<K>` carries the actual selection so a controlled
@@ -370,7 +392,7 @@ pub struct TabsProps<K: TabKey> {
     pub children: Element,
 }
 
-impl<K: TabKey> Debug for TabsProps<K> {
+impl<K: TabKey> Debug for RootProps<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = self.value.map(|selected| selected.map(TabKey::into_key));
 
@@ -383,7 +405,7 @@ impl<K: TabKey> Debug for TabsProps<K> {
             .map(TabKey::into_key)
             .collect::<Vec<_>>();
 
-        f.debug_struct("TabsProps")
+        f.debug_struct("RootProps")
             .field("value", &value)
             .field("default_value", &default_value)
             .field("tabs", &self.tabs)
@@ -457,25 +479,95 @@ struct TabsStoreSetup<K: TabKey> {
 }
 
 struct TabsRenderSnapshot<K: TabKey> {
-    config: TabsConfig<K>,
+    config: Rc<TabsConfig<K>>,
     registrations: Vec<tabs::TabRegistration>,
     core_props: Props,
+}
+
+#[derive(Clone)]
+struct TabsContext<K: TabKey> {
+    revision: Signal<u64>,
+    data: CopyValue<TabsContextData<K>>,
+}
+
+#[derive(Clone)]
+struct TabsContextData<K: TabKey> {
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    send_with_focus_pulse: EventHandler<Event>,
+    config: Rc<TabsConfig<K>>,
+    tabs: Rc<Vec<Tab<K>>>,
+    reorder_status: Signal<String>,
+    drag_source: Signal<Option<Key>>,
+    modality_revision: Signal<u64>,
+    tab_attrs_by_key: Memo<BTreeMap<Key, Vec<Attribute>>>,
+    tab_nodes: Signal<BTreeMap<Key, Rc<MountedData>>>,
+    modality: Arc<dyn ModalityContext>,
+    on_value_change: Option<EventHandler<Option<K>>>,
+    on_close_tab: Option<EventHandler<K>>,
+    on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
+    owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
+    owned_render_tabs: Option<Rc<Vec<Tab<K>>>>,
+    disallow_empty_selection: bool,
+    lazy_mount: bool,
+    unmount_on_exit: bool,
+    ever_selected: Signal<BTreeSet<Key>>,
+    indicator_revision: Signal<u64>,
+    platform: Arc<dyn PlatformEffects>,
+}
+
+#[derive(Clone, Copy)]
+struct TabsCommonContext {
+    reorder_status: Signal<String>,
+    reorderable: Signal<bool>,
+}
+
+#[derive(Clone, PartialEq)]
+struct TabsContextRevisionProps<K: TabKey> {
+    disallow_empty_selection: bool,
+    lazy_mount: bool,
+    unmount_on_exit: bool,
+    on_value_change: Option<EventHandler<Option<K>>>,
+    on_close_tab: Option<EventHandler<K>>,
+    on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
+}
+
+#[derive(Clone, Copy)]
+struct TabItemContext<K: TabKey> {
+    item: CopyValue<TabRenderItem<K>>,
+}
+
+/// Typed render item supplied by [`List`] and [`Panels`] when rendering
+/// tab-scoped parts.
+///
+/// The item carries the adapter row data selected from the root
+/// [`TabsSource`]. Consumers can pass it to [`TabShell`] or [`Panel`]
+/// without repeating or stringifying tab keys.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TabRenderItem<K: TabKey> {
+    /// Row data for this tab in the current collection order.
+    pub tab: Tab<K>,
+}
+
+impl<K: TabKey> TabRenderItem<K> {
+    /// Returns the typed key for this render item.
+    #[must_use]
+    pub const fn key(&self) -> K {
+        self.tab.key
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────
 // Tabs component
 // ────────────────────────────────────────────────────────────────────
 
-/// Renders the agnostic Tabs machine as a Dioxus compound component.
+/// Dioxus Tabs root part.
 ///
-/// The single component owns the full anatomy (Root, List, Tab×N,
-/// Indicator, Panel×N, optional `CloseTrigger`, optional reorder live
-/// region). Per-tab content comes through the [`Tab`] rows in `tabs`;
-/// `children` is rendered inside the root after the panels for any
-/// adapter-side decoration consumers want next to the tablist.
+/// The root owns machine setup, tab registration, callbacks, i18n messages,
+/// refs, and typed context. Child parts render from the root [`TabsSource`]
+/// instead of requiring consumers to manually repeat tab keys.
 #[component]
-pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
-    let TabsProps {
+pub fn Root<K: TabKey>(props: RootProps<K>) -> Element {
+    let RootProps {
         value,
         default_value,
         tabs,
@@ -552,11 +644,8 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
         consumer_attrs.clone(),
         root_attrs()
     )));
-    let list_attrs = tabs_list_attrs(machine, &config.tabs_meta);
 
     use_auto_direction_sync(machine, dir, &platform);
-
-    let tab_indicator_attrs = tabs_indicator_attrs(machine);
 
     let mut indicator_revision = use_signal(|| 0_u64);
 
@@ -568,13 +657,8 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
         &config.tabs_meta,
     );
 
-    let indicator_style = use_indicator_style(machine, &platform, indicator_revision);
-
-    let selected_tab = machine.derive(|api| api.selected_tab().cloned());
-
-    let selected_key = selected_tab();
-
     let owned_render_tabs = owned_tabs_store.map(|_| Rc::new(tabs.clone()));
+    let render_tabs = Rc::new(tabs);
 
     let tab_attrs_by_key = use_tab_attrs_by_key(
         machine,
@@ -584,58 +668,731 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
         reorderable_signal,
     );
 
+    use_context_provider(|| TabsCommonContext {
+        reorder_status,
+        reorderable: reorderable_signal,
+    });
+
+    let mut context_revision = use_signal(|| 0_u64);
+    let mut previous_context_tabs = use_signal(|| (*render_tabs).clone());
+    let mut previous_context_config = use_signal(|| Rc::clone(&config));
+    let next_context_props = TabsContextRevisionProps {
+        disallow_empty_selection,
+        lazy_mount,
+        unmount_on_exit,
+        on_value_change,
+        on_close_tab,
+        on_reorder,
+    };
+    let mut previous_context_props = use_signal(|| next_context_props.clone());
+
+    if *previous_context_tabs.peek() != *render_tabs {
+        previous_context_tabs.set((*render_tabs).clone());
+        *context_revision.write() += 1;
+    }
+
+    if *previous_context_config.peek() != config {
+        previous_context_config.set(Rc::clone(&config));
+        *context_revision.write() += 1;
+    }
+
+    if *previous_context_props.peek() != next_context_props {
+        previous_context_props.set(next_context_props);
+        *context_revision.write() += 1;
+    }
+
+    let mut tabs_context_data = use_hook(|| {
+        CopyValue::new(TabsContextData {
+            machine,
+            send_with_focus_pulse,
+            config: Rc::clone(&config),
+            tabs: Rc::clone(&render_tabs),
+            reorder_status,
+            drag_source,
+            modality_revision,
+            tab_attrs_by_key,
+            tab_nodes,
+            modality: Arc::clone(&modality),
+            on_value_change,
+            on_close_tab,
+            on_reorder,
+            owned_tabs_store,
+            owned_render_tabs: owned_render_tabs.clone(),
+            disallow_empty_selection,
+            lazy_mount,
+            unmount_on_exit,
+            ever_selected,
+            indicator_revision,
+            platform: Arc::clone(&platform),
+        })
+    });
+
+    tabs_context_data.set(TabsContextData {
+        machine,
+        send_with_focus_pulse,
+        config,
+        tabs: render_tabs,
+        reorder_status,
+        drag_source,
+        modality_revision,
+        tab_attrs_by_key,
+        tab_nodes,
+        modality,
+        on_value_change,
+        on_close_tab,
+        on_reorder,
+        owned_tabs_store,
+        owned_render_tabs,
+        disallow_empty_selection,
+        lazy_mount,
+        unmount_on_exit,
+        ever_selected,
+        indicator_revision,
+        platform,
+    });
+
+    use_context_provider(|| TabsContext {
+        revision: context_revision,
+        data: tabs_context_data,
+    });
+
     rsx! {
-        div {..root_attrs(),
-            div {..list_attrs,
-                {
-                    tabs
-                        .iter()
-                        .map(|tab| {
-                            render_tab_button(
-                                tab.clone(),
-                                machine,
-                                send_with_focus_pulse,
-                                &config,
-                                reorder_status,
-                                drag_source,
-                                modality_revision,
-                                tab_attrs_by_key,
-                                tab_nodes,
-                                &modality,
-                                on_value_change,
-                                on_close_tab,
-                                on_reorder,
-                                owned_tabs_store,
-                                owned_render_tabs.as_ref(),
-                                disallow_empty_selection,
-                                indicator_revision,
-                            )
-                        })
-                }
-                span { style: "{indicator_style}", ..tab_indicator_attrs() }
-            }
+        div { ..root_attrs(),{children} }
+    }
+}
+
+/// Dioxus Tabs list part. Renders tab rows from the root [`TabsSource`].
+#[component]
+pub fn List<K: TabKey>(
+    /// Optional typed renderer for each tab row.
+    #[props(optional)]
+    tab_row: Option<Callback<TabRenderItem<K>, Element>>,
+
+    /// Global HTML attributes forwarded onto the tablist part.
+    #[props(extends = GlobalAttributes)]
+    attrs: Vec<Attribute>,
+) -> Element {
+    let TabsContext { revision, data } = use_context::<TabsContext<K>>();
+
+    let _revision = revision();
+
+    let TabsContextData {
+        machine,
+        tabs,
+        indicator_revision,
+        platform,
+        ..
+    } = data.cloned();
+
+    let list_attrs = merge_dioxus_attrs(attrs, tabs_list_attrs(machine));
+    let tab_indicator_attrs = tabs_indicator_attrs(machine);
+
+    let indicator_style = use_indicator_style(machine, &platform, indicator_revision);
+
+    rsx! {
+        div {..list_attrs,
             {
                 tabs
                     .iter()
                     .map(|tab| {
-                        render_tab_panel(
-                            tab.clone(),
-                            machine,
-                            lazy_mount,
-                            unmount_on_exit,
-                            ever_selected,
-                            selected_key.as_ref(),
-                        )
+                        let vdom_key = dioxus_vdom_key(&tab.key.into_key());
+                        let item = TabRenderItem { tab: tab.clone() };
+
+                        if let Some(tab_row) = tab_row {
+                            return rsx! {
+                                Fragment { key: "{vdom_key}", {tab_row.call(item)} }
+                            };
+                        }
+
+                        rsx! {
+                            TabShell { key: "{vdom_key}", item }
+                        }
                     })
             }
-            {children}
-            if reorderable {
-                div {
-                    "aria-live": "polite",
-                    "aria-atomic": "true",
-                    style: "position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;",
-                    "{reorder_status}"
+            Indicator { attrs: tab_indicator_attrs(), style: indicator_style() }
+        }
+    }
+}
+
+/// Dioxus Tabs panels collection. Renders one panel for every registered row.
+#[component]
+pub fn Panels<K: TabKey>(
+    /// Optional typed renderer for each panel row.
+    #[props(optional)]
+    panel: Option<Callback<TabRenderItem<K>, Element>>,
+
+    /// Global HTML attributes forwarded onto the panels wrapper.
+    #[props(extends = GlobalAttributes)]
+    attrs: Vec<Attribute>,
+) -> Element {
+    let TabsContext { revision, data } = use_context::<TabsContext<K>>();
+
+    let _revision = revision();
+
+    let TabsContextData { machine, tabs, .. } = data.cloned();
+
+    let attrs = panel_collection_attrs(machine, attrs);
+
+    rsx! {
+        div {..attrs,
+            {
+                tabs
+                    .iter()
+                    .map(|tab| {
+                        let vdom_key = dioxus_vdom_key(&tab.key.into_key());
+                        let item = TabRenderItem { tab: tab.clone() };
+
+                        if let Some(render_panel) = panel {
+                            return rsx! {
+                                Fragment { key: "{vdom_key}", {render_panel.call(item)} }
+                            };
+                        }
+
+                        rsx! {
+                            Panel { key: "{vdom_key}", item }
+                        }
+                    })
+            }
+        }
+    }
+}
+
+/// Dioxus Tabs shell part for one tab row.
+///
+/// The shell renders the trigger, optional close affordance, mounted ref,
+/// events, and drag-image wiring for the supplied [`TabRenderItem`].
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+#[component]
+pub fn TabShell<K: TabKey>(
+    /// Typed item supplied by the root collection renderer.
+    item: TabRenderItem<K>,
+
+    /// Global HTML attributes forwarded onto the shell part.
+    #[props(extends = GlobalAttributes)]
+    attrs: Vec<Attribute>,
+
+    /// Optional custom shell children. When omitted, the shell renders the
+    /// default [`Trigger`] plus [`CloseTrigger`] composition.
+    #[props(optional)]
+    children: Option<Element>,
+) -> Element {
+    let TabsContext { data, revision, .. } = use_context::<TabsContext<K>>();
+
+    let TabsContextData {
+        machine,
+        send_with_focus_pulse,
+        config,
+        mut drag_source,
+        reorder_status,
+        on_reorder,
+        owned_tabs_store,
+        owned_render_tabs,
+        indicator_revision,
+        modality,
+        modality_revision,
+        ..
+    } = data.cloned();
+
+    let _revision = revision();
+    let _modality_revision = modality_revision();
+
+    let key = Rc::new(item.tab.key.into_key());
+
+    let shell_attrs = {
+        let key = Rc::clone(&key);
+        let modality = Arc::clone(&modality);
+
+        machine.derive(move |api| {
+            let _modality_revision = modality_revision();
+
+            attr_map_to_dioxus_inline_attrs(
+                api.tab_shell_attrs(&key, !modality.had_pointer_interaction()),
+            )
+        })
+    };
+
+    let shell_attrs = merge_dioxus_attrs(attrs, shell_attrs());
+
+    let vdom_key = dioxus_vdom_key(&key);
+    let draggable = config.reorderable.to_string();
+    let on_dragstart = {
+        let key = Rc::clone(&key);
+        let config = Rc::clone(&config);
+        move |event: dioxus::prelude::Event<DragData>| {
+            if config.reorderable {
+                set_tab_shell_drag_image(&event);
+                set_tab_shell_dragging(&event);
+
+                drag_source.set(Some((*key).clone()));
+            }
+        }
+    };
+
+    let on_dragend = move |event: dioxus::prelude::Event<DragData>| {
+        clear_tab_shell_dragging(&event);
+        drag_source.set(None);
+    };
+
+    let on_dragover = {
+        let key = Rc::clone(&key);
+        let config = Rc::clone(&config);
+        move |event: dioxus::prelude::Event<DragData>| {
+            if can_accept_drag(&config, drag_source, &key) {
+                event.prevent_default();
+            }
+        }
+    };
+
+    let on_drop = {
+        let key = Rc::clone(&key);
+        let config = Rc::clone(&config);
+        let owned_render_tabs = owned_render_tabs.clone();
+        move |event: dioxus::prelude::Event<DragData>| {
+            clear_tab_shell_dragging(&event);
+            handle_tab_drop(
+                &event,
+                &key,
+                machine,
+                send_with_focus_pulse,
+                &config,
+                drag_source,
+                reorder_status,
+                on_reorder,
+                owned_tabs_store,
+                owned_render_tabs.as_deref().map(Vec::as_slice),
+                indicator_revision,
+            );
+        }
+    };
+
+    let mut item_context = use_hook(|| CopyValue::new(item.clone()));
+
+    item_context.set(item);
+
+    use_context_provider(|| TabItemContext { item: item_context });
+
+    if let Some(children) = children {
+        return rsx! {
+            div {
+                key: "{vdom_key}",
+                ondragstart: on_dragstart,
+                ondragover: on_dragover,
+                ondrop: on_drop,
+                ondragend: on_dragend,
+                draggable: "{draggable}",
+                ..shell_attrs,
+                {children}
+            }
+        };
+    }
+
+    rsx! {
+        div {
+            key: "{vdom_key}",
+            ondragstart: on_dragstart,
+            ondragover: on_dragover,
+            ondrop: on_drop,
+            ondragend: on_dragend,
+            draggable: "{draggable}",
+            ..shell_attrs,
+            Trigger::<K> {}
+            CloseTrigger::<K> {}
+        }
+    }
+}
+
+/// Dioxus Tabs trigger part for one tab row.
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+#[component]
+pub fn Trigger<K: TabKey>(
+    /// Internal marker that keeps the key type attached to the generated
+    /// component props after the row item moved into [`TabShell`] context.
+    #[props(default)]
+    _key: PhantomData<K>,
+
+    /// Global HTML attributes forwarded onto the trigger part.
+    #[props(extends = GlobalAttributes)]
+    attrs: Vec<Attribute>,
+) -> Element {
+    let TabsContext { data, revision, .. } = use_context::<TabsContext<K>>();
+
+    let _revision = revision();
+
+    let TabsContextData {
+        machine,
+        send_with_focus_pulse,
+        config,
+        reorder_status,
+        mut modality_revision,
+        tab_attrs_by_key,
+        mut tab_nodes,
+        modality,
+        on_value_change,
+        on_close_tab,
+        on_reorder,
+        owned_tabs_store,
+        owned_render_tabs,
+        disallow_empty_selection,
+        indicator_revision,
+        ..
+    } = data.cloned();
+
+    let TabRenderItem { tab } = try_consume_context::<TabItemContext<K>>()
+        .expect("<tabs::Trigger> must be rendered inside <tabs::TabShell>")
+        .item
+        .cloned();
+
+    let key = Rc::new(tab.key.into_key());
+
+    let tab_attrs = merge_dioxus_attrs(
+        attrs,
+        tab_attrs_by_key().remove(&key).unwrap_or_else(|| {
+            machine.with_api_snapshot(|api| {
+                attr_map_to_dioxus_inline_attrs(
+                    api.tab_attrs(&key, !modality.had_pointer_interaction()),
+                )
+            })
+        }),
+    );
+
+    let prevent_default_on_click = tab.link.is_some();
+    let on_click = {
+        let key = Rc::clone(&key);
+        let config = Rc::clone(&config);
+        move |event: dioxus::prelude::Event<MouseData>| {
+            if prevent_default_on_click {
+                event.prevent_default();
+            }
+
+            select_and_emit_value_change(
+                machine,
+                send_with_focus_pulse,
+                &key,
+                on_value_change,
+                &config,
+            );
+        }
+    };
+
+    let on_pointerdown = {
+        let modality = Arc::clone(&modality);
+        move |event: dioxus::prelude::Event<PointerData>| {
+            let data = event.data();
+
+            modality.on_pointer_down(pointer_type_from_dioxus(&data.pointer_type()));
+
+            modality_revision += 1;
+        }
+    };
+
+    let on_focus = {
+        let key = Rc::clone(&key);
+        let config = Rc::clone(&config);
+        move |_event: dioxus::prelude::Event<FocusData>| {
+            focus_event_and_emit_value_change(
+                machine,
+                send_with_focus_pulse,
+                &key,
+                on_value_change,
+                &config,
+            );
+        }
+    };
+
+    let on_blur = move |_event: dioxus::prelude::Event<FocusData>| {
+        send_with_focus_pulse.call(Event::Blur);
+    };
+
+    let on_keydown = {
+        let key = Rc::clone(&key);
+        let config = Rc::clone(&config);
+        let label_text = tab.label_text.clone();
+        let owned_render_tabs = owned_render_tabs.clone();
+        move |event: dioxus::prelude::Event<KeyboardData>| {
+            modality_revision += 1;
+
+            handle_tab_keydown(
+                &event,
+                &key,
+                &label_text.resolve(),
+                machine,
+                send_with_focus_pulse,
+                &config,
+                reorder_status,
+                on_value_change,
+                on_close_tab,
+                on_reorder,
+                &modality,
+                owned_tabs_store,
+                owned_render_tabs.as_deref().map(Vec::as_slice),
+                disallow_empty_selection,
+                indicator_revision,
+            );
+        }
+    };
+
+    let on_mounted = {
+        let key = Rc::clone(&key);
+        move |event: dioxus::prelude::Event<MountedData>| {
+            tab_nodes.write().insert((*key).clone(), event.data());
+        }
+    };
+
+    if let Some(href) = tab.link {
+        rsx! {
+            a {
+                href: "{href}",
+                onclick: on_click,
+                onfocus: on_focus,
+                onblur: on_blur,
+                onkeydown: on_keydown,
+                onpointerdown: on_pointerdown,
+                onmounted: on_mounted,
+                ..tab_attrs,
+                {tab.label}
+            }
+        }
+    } else {
+        rsx! {
+            div {
+                onclick: on_click,
+                onfocus: on_focus,
+                onblur: on_blur,
+                onkeydown: on_keydown,
+                onpointerdown: on_pointerdown,
+                onmounted: on_mounted,
+                ..tab_attrs,
+                {tab.label}
+            }
+        }
+    }
+}
+
+/// Dioxus Tabs close affordance part for one tab row.
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
+)]
+#[component]
+pub fn CloseTrigger<K: TabKey>(
+    /// Internal marker that keeps the key type attached to the generated
+    /// component props after the row item moved into [`TabShell`] context.
+    #[props(default)]
+    _key: PhantomData<K>,
+
+    /// Global HTML attributes forwarded onto the close affordance.
+    #[props(extends = GlobalAttributes)]
+    attrs: Vec<Attribute>,
+) -> Element {
+    let TabsContext { data, revision, .. } = use_context::<TabsContext<K>>();
+
+    let _revision = revision();
+
+    let TabsContextData {
+        machine,
+        send_with_focus_pulse,
+        config,
+        on_value_change,
+        on_close_tab,
+        owned_tabs_store,
+        owned_render_tabs,
+        disallow_empty_selection,
+        ..
+    } = data.cloned();
+
+    let TabRenderItem {
+        tab:
+            Tab {
+                key: typed_key,
+                label_text,
+                close_trigger,
+                ..
+            },
+    } = try_consume_context::<TabItemContext<K>>()
+        .expect("<tabs::CloseTrigger> must be rendered inside <tabs::TabShell>")
+        .item
+        .cloned();
+
+    let key = typed_key.into_key();
+
+    let can_close = config
+        .tabs_meta
+        .iter()
+        .any(|meta| meta.key == key && meta.closable && !meta.disabled);
+
+    let next_close_label = label_text.resolve();
+    let mut close_label = use_signal(|| next_close_label.clone());
+
+    if *close_label.peek() != next_close_label {
+        close_label.set(next_close_label);
+    }
+
+    let close_attrs = machine.derive(move |api| {
+        let close_label = close_label();
+
+        attr_map_to_dioxus_inline_attrs(api.close_trigger_attrs(&close_label))
+    });
+
+    let close_attrs = merge_dioxus_attrs(attrs, close_attrs());
+
+    if !can_close {
+        return rsx! {};
+    }
+
+    rsx! {
+        span {
+            onclick: {
+                move |event: dioxus::prelude::Event<MouseData>| {
+                    event.prevent_default();
+                    event.stop_propagation();
+
+                    let (successor_key, successor_element_id) = selected_close_successor(
+                            machine,
+                            &key,
+                        )
+                        .map_or(
+                            (None, None),
+                            |(successor_key, successor_element_id)| (
+                                Some(successor_key),
+                                Some(successor_element_id),
+                            ),
+                        );
+
+                    emit_close_request(
+                        machine,
+                        send_with_focus_pulse,
+                        on_close_tab,
+                        on_value_change,
+                        typed_key,
+                        &key,
+                        successor_key,
+                        &config.tabs_meta,
+                        owned_tabs_store,
+                        owned_render_tabs.as_deref().map(Vec::as_slice),
+                        disallow_empty_selection,
+                    );
+
+                    if let Some(element_id) = successor_element_id {
+                        defer_focus_tab_element_by_id(element_id);
+                    }
                 }
+            },
+            ..close_attrs,
+            {close_trigger.unwrap_or_else(|| rsx! {
+                svg {
+                    view_box: "0 0 12 12",
+                    width: "12",
+                    height: "12",
+                    "aria-hidden": "true",
+                    "focusable": "false",
+                    path {
+                        d: "M3 3 L9 9 M9 3 L3 9",
+                        stroke: "currentColor",
+                        stroke_width: "1.8",
+                        stroke_linecap: "round",
+                    }
+                }
+            })}
+        }
+    }
+}
+
+/// Dioxus Tabs panel part for one tab row.
+#[component]
+pub fn Panel<K: TabKey>(
+    /// Typed item supplied by the root collection renderer.
+    item: TabRenderItem<K>,
+
+    /// Global HTML attributes forwarded onto the panel part.
+    #[props(extends = GlobalAttributes)]
+    attrs: Vec<Attribute>,
+) -> Element {
+    let TabRenderItem {
+        tab: Tab { key, panel, .. },
+    } = item;
+
+    let TabsContext { revision, data } = use_context::<TabsContext<K>>();
+
+    let _revision = revision();
+
+    let TabsContextData {
+        machine,
+        lazy_mount,
+        unmount_on_exit,
+        ever_selected,
+        ..
+    } = data.cloned();
+
+    let selected_tab = machine.derive(|api| api.selected_tab().cloned());
+    let selected_key = selected_tab();
+
+    let key = key.into_key();
+
+    let vdom_key = dioxus_vdom_key(&key);
+    let already_selected = ever_selected.read().contains(&key);
+
+    let should_render_body = tabs::should_render_panel_body(
+        selected_key.as_ref() == Some(&key),
+        already_selected,
+        lazy_mount,
+        unmount_on_exit,
+    );
+
+    let panel_attrs = merge_dioxus_attrs(
+        attrs,
+        machine.with_api_snapshot(move |api| {
+            attr_map_to_dioxus_inline_attrs(api.panel_attrs(&key, None))
+        }),
+    );
+
+    rsx! {
+        div { key: "{vdom_key}", ..panel_attrs,
+            {
+                if should_render_body {
+                    panel
+                } else {
+                    rsx! {}
+                }
+            }
+        }
+    }
+}
+
+/// Dioxus Tabs indicator part.
+#[component]
+fn Indicator(
+    /// Attributes produced by the agnostic Tabs API for the indicator node.
+    attrs: Vec<Attribute>,
+
+    /// Inline style text measured by the adapter.
+    style: String,
+) -> Element {
+    rsx! {
+        span { style, ..attrs }
+    }
+}
+
+/// Dioxus Tabs reorder announcement live region.
+#[component]
+pub fn LiveRegion() -> Element {
+    let TabsCommonContext {
+        reorderable,
+        reorder_status,
+    } = use_context::<TabsCommonContext>();
+
+    rsx! {
+        if reorderable() {
+            div {
+                "aria-live": "polite",
+                "aria-atomic": "true",
+                style: "position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;",
+                "{reorder_status}"
             }
         }
     }
@@ -659,8 +1416,10 @@ fn use_tabs_store<K: TabKey>(tabs: &TabsSource<K>) -> TabsStoreSetup<K> {
     let (tabs, owned_tabs_store) = match tabs {
         TabsSource::Owned(latest_tabs) => {
             let previous_prop_keys = owned_prop_keys.peek().clone();
+
             let reconciled =
                 owned_tabs_for_render(&owned_tabs_store.read(), latest_tabs, &previous_prop_keys);
+
             let latest_prop_keys = latest_tabs.iter().map(|tab| tab.key).collect::<Vec<_>>();
 
             if owned_tabs_changed(&owned_tabs_store.read(), &reconciled) {
@@ -674,7 +1433,7 @@ fn use_tabs_store<K: TabKey>(tabs: &TabsSource<K>) -> TabsStoreSetup<K> {
             (reconciled, Some(owned_tabs_store))
         }
 
-        TabsSource::Store(tabs) => (tabs.read().clone(), None),
+        TabsSource::Store(tabs) => (tabs.cloned(), None),
     };
 
     TabsStoreSetup {
@@ -787,35 +1546,29 @@ fn build_tabs_render_snapshot<K: TabKey>(
 ) -> TabsRenderSnapshot<K> {
     let tabs_meta = tabs_meta_snapshot(tabs, disabled_keys);
 
-    let registrations = registrations_from_meta(&tabs_meta);
-
-    let config = TabsConfig {
-        orientation,
-        dir,
-        activation_mode,
-        reorderable,
-        tabs_meta: tabs_meta.clone(),
-    };
-
-    let core_props = tabs_core_props(
-        id,
-        value,
-        default_value,
-        orientation,
-        activation_mode,
-        dir,
-        loop_focus,
-        disallow_empty_selection,
-        lazy_mount,
-        unmount_on_exit,
-        disabled_keys_from_meta(&tabs_meta),
-        reorderable,
-    );
-
     TabsRenderSnapshot {
-        config,
-        registrations,
-        core_props,
+        registrations: registrations_from_meta(&tabs_meta),
+        core_props: tabs_core_props(
+            id,
+            value,
+            default_value,
+            orientation,
+            activation_mode,
+            dir,
+            loop_focus,
+            disallow_empty_selection,
+            lazy_mount,
+            unmount_on_exit,
+            disabled_keys_from_meta(&tabs_meta),
+            reorderable,
+        ),
+        config: Rc::new(TabsConfig {
+            orientation,
+            dir,
+            activation_mode,
+            reorderable,
+            tabs_meta,
+        }),
     }
 }
 
@@ -894,10 +1647,10 @@ fn use_tabs_messages_sync(machine: crate::use_machine::UseMachineReturn<tabs::Ma
     let next = (locale, messages);
 
     if previous.peek().as_ref() != Some(&next) {
-        machine.send.call(Event::SyncMessages {
-            locale: next.0.clone(),
-            messages: next.1.clone(),
-        });
+        let (locale, messages) = next.clone();
+
+        machine.send.call(Event::SyncMessages { locale, messages });
+
         previous.set(Some(next));
     }
 }
@@ -987,29 +1740,22 @@ fn tab_id_from_api(api: &tabs::Api<'_>, key: &Key) -> Option<String> {
         .map(String::from)
 }
 
-fn tabs_list_attrs<K: TabKey>(
+fn tabs_list_attrs(machine: crate::use_machine::UseMachineReturn<tabs::Machine>) -> Vec<Attribute> {
+    machine.with_api_snapshot(|api| attr_map_to_dioxus_inline_attrs(api.list_attrs()))
+}
+
+fn panel_collection_attrs(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    tabs_meta: &[TabMeta<K>],
+    consumer_attrs: Vec<Attribute>,
 ) -> Vec<Attribute> {
-    machine.with_api_snapshot(|api| {
-        let mut attrs = api.list_attrs();
+    merge_dioxus_attrs(
+        consumer_attrs,
+        attr_map_to_dioxus_inline_attrs(machine.with_api_snapshot(panels_attrs_from_api)),
+    )
+}
 
-        let owns = tabs_meta
-            .iter()
-            .filter_map(|tab| {
-                api.tab_attrs(&tab.key, false)
-                    .get(&HtmlAttr::Id)
-                    .map(String::from)
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        if !owns.is_empty() {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Owns), owns);
-        }
-
-        attr_map_to_dioxus_inline_attrs(attrs)
-    })
+fn panels_attrs_from_api(api: &tabs::Api<'_>) -> AttrMap {
+    api.panels_attrs()
 }
 
 fn use_auto_direction_sync(
@@ -1059,6 +1805,7 @@ fn use_tab_attrs_by_key<K: TabKey>(
         .iter()
         .map(|meta| meta.key.clone())
         .collect::<Vec<_>>();
+
     let mut tab_keys = use_signal(|| next_tab_keys.clone());
 
     if *tab_keys.peek() != next_tab_keys {
@@ -1066,8 +1813,9 @@ fn use_tab_attrs_by_key<K: TabKey>(
     }
 
     machine.derive(move |api| {
-        modality_revision();
-        let is_reorderable = reorderable_signal();
+        let _modality_revision = modality_revision();
+        let _reorderable = reorderable_signal();
+
         let tab_keys = tab_keys();
 
         tab_keys
@@ -1075,36 +1823,13 @@ fn use_tab_attrs_by_key<K: TabKey>(
             .map(|key| {
                 (
                     key.clone(),
-                    dioxus_tab_attrs(
-                        api,
-                        key,
-                        !modality.had_pointer_interaction(),
-                        is_reorderable,
+                    attr_map_to_dioxus_inline_attrs(
+                        api.tab_attrs(key, !modality.had_pointer_interaction()),
                     ),
                 )
             })
             .collect()
     })
-}
-
-fn dioxus_tab_attrs(
-    api: &tabs::Api<'_>,
-    key: &Key,
-    focus_visible: bool,
-    is_reorderable: bool,
-) -> Vec<Attribute> {
-    let mut attrs = api.tab_attrs(key, focus_visible);
-
-    attrs.set(
-        HtmlAttr::Aria(AriaAttr::RoleDescription),
-        if is_reorderable {
-            AttrValue::from("draggable tab")
-        } else {
-            AttrValue::None
-        },
-    );
-
-    attr_map_to_dioxus_inline_attrs(attrs)
 }
 
 fn use_indicator_style(
@@ -1123,12 +1848,10 @@ fn use_indicator_style(
     use_effect({
         let platform = Arc::clone(platform);
         move || {
-            // Just to trigger the effect when selection changes; the actual measurement happens
-            drop(selected_memo());
-
-            drop(layout_memo());
-
-            let _ = indicator_revision();
+            // Subscribed reads: the values only trigger remeasurement.
+            let _selected = selected_memo();
+            let _layout = layout_memo();
+            let _indicator_revision = indicator_revision();
 
             indicator_style.set(indicator_measurement_style(machine, platform.as_ref()));
 
@@ -1147,292 +1870,8 @@ fn use_indicator_style(
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Tab button rendering
+// Tab row rendering
 // ────────────────────────────────────────────────────────────────────
-
-#[expect(
-    unused_qualifications,
-    reason = "rsx! macro expansion currently reports event-handler attribute names as redundant qualifications"
-)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "tab rendering needs machine, event callbacks, and reactive store handles"
-)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "Dioxus tab rendering keeps related DOM event closures in one helper"
-)]
-fn render_tab_button<K: TabKey>(
-    tab: Tab<K>,
-    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    send: EventHandler<Event>,
-    config: &TabsConfig<K>,
-    reorder_status: Signal<String>,
-    drag_source: Signal<Option<Key>>,
-    mut modality_revision: Signal<u64>,
-    tab_attrs_by_key: Memo<BTreeMap<Key, Vec<Attribute>>>,
-    mut tab_nodes: Signal<BTreeMap<Key, Rc<MountedData>>>,
-    modality: &Arc<dyn ModalityContext>,
-    on_value_change: Option<EventHandler<Option<K>>>,
-    on_close_tab: Option<EventHandler<K>>,
-    on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
-    owned_tabs_store: Option<Store<Vec<Tab<K>>>>,
-    owned_render_tabs: Option<&Rc<Vec<Tab<K>>>>,
-    disallow_empty_selection: bool,
-    indicator_revision: Signal<u64>,
-) -> Element {
-    let typed_key = tab.key;
-    let key = typed_key.into_key();
-    let vdom_key = dioxus_vdom_key(&key);
-    let owned_render_tabs = owned_render_tabs.cloned();
-
-    let mut attrs_by_key = tab_attrs_by_key();
-    let tab_attrs = attrs_by_key.remove(&key).unwrap_or_else(|| {
-        machine.with_api_snapshot(|api| {
-            dioxus_tab_attrs(
-                api,
-                &key,
-                !modality.had_pointer_interaction(),
-                config.reorderable,
-            )
-        })
-    });
-
-    let label = tab.label;
-
-    let link = tab.link;
-
-    let prevent_default_on_click = link.is_some();
-
-    let on_click = {
-        let key = key.clone();
-        let config = (*config).clone();
-        move |event: dioxus::prelude::Event<MouseData>| {
-            if prevent_default_on_click {
-                event.prevent_default();
-            }
-
-            select_and_emit_value_change(machine, send, &key, on_value_change, &config);
-        }
-    };
-
-    let on_pointerdown = {
-        let modality = Arc::clone(modality);
-        move |event: dioxus::prelude::Event<PointerData>| {
-            let data = event.data();
-
-            modality.on_pointer_down(pointer_type_from_dioxus(&data.pointer_type()));
-            modality_revision += 1;
-        }
-    };
-
-    let on_focus = {
-        let key = key.clone();
-        let config = (*config).clone();
-        move |_event: dioxus::prelude::Event<FocusData>| {
-            focus_event_and_emit_value_change(machine, send, &key, on_value_change, &config);
-        }
-    };
-
-    let on_blur = move |_event: dioxus::prelude::Event<FocusData>| {
-        send.call(Event::Blur);
-    };
-
-    let on_keydown = {
-        let key = key.clone();
-        let config = (*config).clone();
-        let modality = Arc::clone(modality);
-        let label_text = tab.label_text.resolve();
-        let owned_render_tabs = owned_render_tabs.clone();
-        move |event: dioxus::prelude::Event<KeyboardData>| {
-            modality_revision += 1;
-
-            handle_tab_keydown(
-                &event,
-                &key,
-                &label_text,
-                machine,
-                send,
-                &config,
-                reorder_status,
-                on_value_change,
-                on_close_tab,
-                on_reorder,
-                &modality,
-                owned_tabs_store,
-                owned_render_tabs.as_deref().map(Vec::as_slice),
-                disallow_empty_selection,
-                indicator_revision,
-            );
-        }
-    };
-
-    let draggable = config.reorderable.to_string();
-
-    let on_dragstart = {
-        let key = key.clone();
-        let config = (*config).clone();
-        let mut drag_source = drag_source;
-
-        move |_event: dioxus::prelude::Event<DragData>| {
-            if config.reorderable {
-                drag_source.set(Some(key.clone()));
-            }
-        }
-    };
-
-    let on_dragend = {
-        let mut drag_source = drag_source;
-
-        move |_event: dioxus::prelude::Event<DragData>| {
-            drag_source.set(None);
-        }
-    };
-
-    let on_dragover = {
-        let key = key.clone();
-        let config = (*config).clone();
-        move |event: dioxus::prelude::Event<DragData>| {
-            if can_accept_drag(&config, drag_source, &key) {
-                event.prevent_default();
-            }
-        }
-    };
-
-    let on_drop = {
-        let key = key.clone();
-        let config = (*config).clone();
-        let owned_render_tabs = owned_render_tabs.clone();
-
-        move |event: dioxus::prelude::Event<DragData>| {
-            handle_tab_drop(
-                &event,
-                &key,
-                machine,
-                send,
-                &config,
-                drag_source,
-                reorder_status,
-                on_reorder,
-                owned_tabs_store,
-                owned_render_tabs.as_deref().map(Vec::as_slice),
-                indicator_revision,
-            );
-        }
-    };
-
-    let can_close = config
-        .tabs_meta
-        .iter()
-        .any(|meta| meta.key == key && meta.closable && !meta.disabled);
-
-    let close_button = if can_close {
-        let close_attrs = attr_map_to_dioxus_inline_attrs(machine.with_api_snapshot({
-            let label_text = tab.label_text.resolve();
-            move |api| {
-                let mut attrs = api.close_trigger_attrs(&label_text);
-
-                attrs.set(HtmlAttr::TabIndex, "-1");
-
-                attrs
-            }
-        }));
-
-        rsx! {
-            button {
-                onclick: {
-                    let key = key.clone();
-                    let tabs_meta = config.tabs_meta.clone();
-                    let owned_render_tabs = owned_render_tabs.clone();
-                    move |event: dioxus::prelude::Event<MouseData>| {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        let successor = selected_close_successor(machine, &key);
-
-                        emit_close_request(
-                            machine,
-                            send,
-                            on_close_tab,
-                            on_value_change,
-                            typed_key,
-                            &key,
-                            successor.as_ref().map(|(successor_key, _)| successor_key.clone()),
-                            &tabs_meta,
-                            owned_tabs_store,
-                            owned_render_tabs.as_deref().map(Vec::as_slice),
-                            disallow_empty_selection,
-                        );
-
-                        if let Some((_successor_key, element_id)) = successor {
-                            defer_focus_tab_element_by_id(element_id);
-                        }
-                    }
-                },
-                ..close_attrs,
-            }
-        }
-    } else {
-        rsx! {}
-    };
-
-    if let Some(href) = link {
-        rsx! {
-            Fragment { key: "{vdom_key}",
-                a {
-                    href: "{href}",
-                    onclick: on_click,
-                    onfocus: on_focus,
-                    onblur: on_blur,
-                    onkeydown: on_keydown,
-                    onpointerdown: on_pointerdown,
-                    ondragstart: on_dragstart,
-                    ondragover: on_dragover,
-                    ondrop: on_drop,
-                    ondragend: on_dragend,
-                    onmounted: {
-                        let key = key.clone();
-                        move |event: dioxus::prelude::Event<MountedData>| {
-                            tab_nodes
-                                .write()
-                                .insert(key.clone(), event.data());
-                        }
-                    },
-                    draggable: "{draggable}",
-                    ..tab_attrs,
-                    {label}
-                }
-                {close_button}
-            }
-        }
-    } else {
-        rsx! {
-            div {
-                key: "{vdom_key}",
-                onclick: on_click,
-                onfocus: on_focus,
-                onblur: on_blur,
-                onkeydown: on_keydown,
-                onpointerdown: on_pointerdown,
-                ondragstart: on_dragstart,
-                ondragover: on_dragover,
-                ondrop: on_drop,
-                ondragend: on_dragend,
-                onmounted: {
-                    let key = key.clone();
-                    move |event: dioxus::prelude::Event<MountedData>| {
-                        tab_nodes
-                            .write()
-                            .insert(key.clone(), event.data());
-                    }
-                },
-                draggable: "{draggable}",
-                ..tab_attrs,
-                {label}
-                {close_button}
-            }
-        }
-    }
-}
 
 fn can_accept_drag<K: TabKey>(
     config: &TabsConfig<K>,
@@ -1449,6 +1888,190 @@ fn can_accept_drag<K: TabKey>(
 
     source_key != *target_key
         && drag_reorder_plan(&config.tabs_meta, &source_key, target_key).is_some()
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn set_tab_shell_drag_image(event: &dioxus::prelude::Event<DragData>) {
+    let data = event.data();
+
+    let Some(event) = data.downcast::<web_sys::DragEvent>() else {
+        return;
+    };
+
+    let Some(data_transfer) = event.data_transfer() else {
+        return;
+    };
+
+    let Some(target) = event.target().or_else(|| event.current_target()) else {
+        return;
+    };
+
+    let Ok(target) = target.dyn_into::<web_sys::Element>() else {
+        return;
+    };
+
+    let shell = target
+        .closest(r#"[data-ars-part="tab-shell"]"#)
+        .ok()
+        .flatten()
+        .or_else(|| target.parent_element());
+
+    let Some(shell) = shell else {
+        return;
+    };
+
+    blur_drag_source(&shell);
+    scrub_focus_visible_attrs(&shell);
+
+    let rect = shell.get_bounding_client_rect();
+
+    let Some(preview) = append_tab_drag_preview(&shell) else {
+        return;
+    };
+
+    let x = (rect.width() / 2.0).round() as i32;
+    let y = (rect.height() / 2.0).round() as i32;
+
+    data_transfer.set_drag_image(&preview, x, y);
+
+    remove_tab_drag_preview_soon(preview);
+}
+
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+const fn set_tab_shell_drag_image(_event: &dioxus::prelude::Event<DragData>) {}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn append_tab_drag_preview(shell: &web_sys::Element) -> Option<web_sys::Element> {
+    let preview = shell
+        .clone_node_with_deep(true)
+        .ok()?
+        .dyn_into::<web_sys::Element>()
+        .ok()?;
+
+    preview.set_attribute("data-ars-drag-image", "tab").ok()?;
+    preview.set_attribute("aria-hidden", "true").ok()?;
+
+    scrub_focus_visible_attrs(&preview);
+
+    preview
+        .set_attribute(
+            "style",
+            "position: fixed; left: 0; top: 0; transform: translate(-10000px, -10000px); \
+             pointer-events: none; z-index: -1;",
+        )
+        .ok()?;
+
+    web_sys::window()?
+        .document()?
+        .body()?
+        .append_child(&preview)
+        .ok()?;
+
+    Some(preview)
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn scrub_focus_visible_attrs(element: &web_sys::Element) {
+    element.remove_attribute("data-ars-focus-visible").ok();
+
+    let Ok(nodes) = element.query_selector_all("[data-ars-focus-visible]") else {
+        return;
+    };
+
+    for index in 0..nodes.length() {
+        let Some(node) = nodes.item(index) else {
+            continue;
+        };
+
+        if let Ok(element) = node.dyn_into::<web_sys::Element>() {
+            element.remove_attribute("data-ars-focus-visible").ok();
+        }
+    }
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn set_tab_shell_dragging(event: &dioxus::prelude::Event<DragData>) {
+    let Some(shell) = tab_shell_from_dioxus_drag_event(event) else {
+        return;
+    };
+
+    shell.set_attribute("data-ars-dragging", "true").ok();
+}
+
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+const fn set_tab_shell_dragging(_event: &dioxus::prelude::Event<DragData>) {}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn clear_tab_shell_dragging(event: &dioxus::prelude::Event<DragData>) {
+    let Some(shell) = tab_shell_from_dioxus_drag_event(event) else {
+        return;
+    };
+
+    shell.remove_attribute("data-ars-dragging").ok();
+}
+
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+const fn clear_tab_shell_dragging(_event: &dioxus::prelude::Event<DragData>) {}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn tab_shell_from_dioxus_drag_event(
+    event: &dioxus::prelude::Event<DragData>,
+) -> Option<web_sys::Element> {
+    let data = event.data();
+    let event = data.downcast::<web_sys::DragEvent>()?;
+
+    tab_shell_from_drag_event(event)
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn tab_shell_from_drag_event(event: &web_sys::DragEvent) -> Option<web_sys::Element> {
+    let target = event.target().or_else(|| event.current_target())?;
+    let target = target.dyn_into::<web_sys::Element>().ok()?;
+
+    target
+        .closest(r#"[data-ars-part="tab-shell"]"#)
+        .ok()
+        .flatten()
+        .or_else(|| target.parent_element())
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn blur_drag_source(shell: &web_sys::Element) {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+
+    let Some(active_element) = document.active_element() else {
+        return;
+    };
+
+    if !shell.contains(Some(active_element.as_ref())) {
+        return;
+    }
+
+    if let Some(html_element) = active_element.dyn_ref::<web_sys::HtmlElement>() {
+        html_element.blur().ok();
+    }
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn remove_tab_drag_preview_soon(preview: web_sys::Element) {
+    let Some(window) = web_sys::window() else {
+        preview.remove();
+
+        return;
+    };
+
+    let cleanup = Closure::once_into_js(move || {
+        preview.remove();
+    });
+
+    drop(
+        window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            cleanup.as_ref().unchecked_ref(),
+            0,
+        ),
+    );
 }
 
 #[expect(
@@ -1523,6 +2146,7 @@ fn handle_tab_drop<K: TabKey>(
     });
 
     reorder_status.set(announcement);
+
     bump_indicator_revision(&mut indicator_revision);
 }
 
@@ -1630,6 +2254,7 @@ fn handle_tab_keydown<K: TabKey>(
                     }
 
                     reorder_status.set(announcement);
+
                     bump_indicator_revision(&mut indicator_revision);
                 }
             }
@@ -1746,72 +2371,6 @@ fn selected_close_successor(
                 .map(|id| (successor_key, id))
         })
     })
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Tab panel rendering
-// ────────────────────────────────────────────────────────────────────
-
-fn render_tab_panel<K: TabKey>(
-    tab: Tab<K>,
-    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    lazy_mount: bool,
-    unmount_on_exit: bool,
-    ever_selected: Signal<BTreeSet<Key>>,
-    selected_key: Option<&Key>,
-) -> Element {
-    let key = tab.key.into_key();
-    let vdom_key = dioxus_vdom_key(&key);
-
-    let selected_key_for_attrs = selected_key.cloned();
-
-    let panel_attrs = machine.with_api_snapshot({
-        let key = key.clone();
-        move |api| {
-            let mut attrs = api.panel_attrs(&key, None);
-            let is_selected = selected_key_for_attrs.as_ref() == Some(&key);
-
-            attrs
-                .set_bool(HtmlAttr::Data("ars-selected"), is_selected)
-                .set_bool(HtmlAttr::Hidden, !is_selected);
-
-            attr_map_to_dioxus_inline_attrs(attrs)
-        }
-    });
-
-    let already_selected = ever_selected.read().contains(&key);
-
-    let should_render_body = should_render_panel_body(
-        selected_key == Some(&key),
-        already_selected,
-        lazy_mount,
-        unmount_on_exit,
-    );
-
-    let panel_body = if should_render_body {
-        tab.panel
-    } else {
-        rsx! {}
-    };
-
-    rsx! {
-        div { key: "{vdom_key}", ..panel_attrs, {panel_body} }
-    }
-}
-
-const fn should_render_panel_body(
-    is_selected: bool,
-    already_selected: bool,
-    lazy_mount: bool,
-    unmount_on_exit: bool,
-) -> bool {
-    if unmount_on_exit {
-        is_selected
-    } else if lazy_mount {
-        is_selected || already_selected
-    } else {
-        true
-    }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -2090,6 +2649,7 @@ fn external_reorder_committed<K: TabKey>(
 fn bump_indicator_revision(indicator_revision: &mut Signal<u64>) {
     let next = {
         let revision = indicator_revision.peek();
+
         revision.wrapping_add(1)
     };
 
@@ -2105,6 +2665,7 @@ fn sync_indicator_signature<K: TabKey>(
 
     if signature.peek().as_str() != next {
         signature.set(next);
+
         bump_indicator_revision(indicator_revision);
     }
 }
@@ -2320,7 +2881,7 @@ fn clear_indicator_auto_update(mut cleanup_store: CopyValue<Option<Box<dyn FnOnc
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct TabsConfig<K: TabKey> {
     orientation: Orientation,
     dir: Direction,
@@ -2652,16 +3213,6 @@ mod tests {
                 ("fourth", "New fourth".to_owned())
             ]
         );
-    }
-
-    #[test]
-    fn should_render_panel_body_mounts_newly_selected_lazy_panel_immediately() {
-        assert!(should_render_panel_body(true, false, true, false));
-        assert!(should_render_panel_body(false, true, true, false));
-        assert!(!should_render_panel_body(false, false, true, false));
-        assert!(should_render_panel_body(true, false, true, true));
-        assert!(!should_render_panel_body(false, true, true, true));
-        assert!(should_render_panel_body(false, false, false, false));
     }
 
     #[test]

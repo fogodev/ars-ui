@@ -6,7 +6,7 @@
 
 use ars_leptos::{
     I18nRegistries, MessageFn, MessagesRegistry,
-    navigation::tabs::{self, Tab, Tabs},
+    navigation::tabs,
     prelude::{Locale, TabKey, Translate, t},
 };
 use leptos::prelude::*;
@@ -87,11 +87,11 @@ pub(crate) fn register_messages(registries: &mut I18nRegistries) {
 pub(crate) fn NavigationPanel() -> impl IntoView {
     view! {
         <section class="showcase-panel wide">
-            <Tabs
+            <tabs::Root
                 default_value=NavigationTab::Overview
                 tabs=[
-                    Tab::new(NavigationTab::Overview, || view! { <p>"Tabs fixture overview."</p> }),
-                    Tab::new(
+                    tabs::Tab::new(NavigationTab::Overview, || view! { <p>"Tabs fixture overview."</p> }),
+                    tabs::Tab::new(
                             NavigationTab::Keyboard,
                             || {
                                 view! {
@@ -104,19 +104,23 @@ pub(crate) fn NavigationPanel() -> impl IntoView {
                             },
                         )
                         .closable(true),
-                    Tab::new(
+                    tabs::Tab::new(
                             NavigationTab::Closable,
                             || view! { <p>{t(NavigationText::ClosablePanel)}</p> },
                         )
                         .closable(true),
-                    Tab::new(
+                    tabs::Tab::new(
                             NavigationTab::Disabled,
                             || view! { <p>{t(NavigationText::DisabledPanel)}</p> },
                         )
                         .disabled(true),
                 ]
                 reorderable=true
-            />
+            >
+                <tabs::List<NavigationTab> />
+                <tabs::Panels<NavigationTab> />
+                <tabs::LiveRegion />
+            </tabs::Root>
         </section>
     }
 }

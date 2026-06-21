@@ -199,8 +199,8 @@ pub fn Clipboard(props: ClipboardSketchProps) -> Element {
     let status_attrs = machine.derive(|api| api.status_attrs());
     rsx! {
         div {
-            button { ..trigger_attrs.read().clone() }
-            div { ..status_attrs.read().clone() }
+            button { ..trigger_attrs.cloned() }
+            div { ..status_attrs.cloned() }
         }
     }
 }

@@ -237,7 +237,7 @@ fn CalendarGrid(props: CalendarGridProps) -> Element {
     let heading = props.machine.derive(move |api| api.heading_text_for(props.offset));
     let weeks = props.machine.derive(move |api| api.weeks_for(props.offset));
     rsx! {
-        table { ..props.machine.derive(move |api| api.grid_attrs_for(props.offset)).read().clone() }
+        table { ..props.machine.derive(move |api| api.grid_attrs_for(props.offset)).cloned() }
     }
 }
 ```

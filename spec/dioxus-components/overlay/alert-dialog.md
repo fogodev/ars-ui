@@ -445,7 +445,7 @@ pub fn AlertDialog(props: AlertDialogProps) -> Element {
         let mut prev_open: Signal<Option<bool>> = use_signal(|| None);
         use_effect(move || {
             let new_open = *open_sig.read();
-            let prev = prev_open.read().clone();
+            let prev = prev_open.cloned();
             if prev.as_ref() != Some(&new_open) {
                 if prev.is_some() {
                     if new_open {
@@ -525,8 +525,8 @@ pub fn Content(props: ContentProps) -> Element {
             div {
                 role: "alertdialog",
                 "aria-modal": "true",
-                "aria-labelledby": title_id.read().clone(),
-                "aria-describedby": desc_id.read().clone(),
+                "aria-labelledby": title_id.cloned(),
+                "aria-describedby": desc_id.cloned(),
                 "data-ars-scope": "alert-dialog",
                 "data-ars-part": "content",
                 "data-ars-state": if is_open { "open" } else { "closed" },
@@ -554,7 +554,7 @@ pub fn Title(props: TitleProps) -> Element {
 
     rsx! {
         h2 {
-            id: ctx.title_id.read().clone(),
+            id: ctx.title_id.cloned(),
             "data-ars-scope": "alert-dialog",
             "data-ars-part": "title",
             {props.children}
@@ -573,7 +573,7 @@ pub fn Description(props: DescriptionProps) -> Element {
 
     rsx! {
         p {
-            id: ctx.description_id.read().clone(),
+            id: ctx.description_id.cloned(),
             "data-ars-scope": "alert-dialog",
             "data-ars-part": "description",
             {props.children}

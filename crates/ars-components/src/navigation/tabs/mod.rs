@@ -234,8 +234,8 @@ pub struct TabRegistration {
     /// Stable identifier for the tab. Must be unique within the list.
     pub key: Key,
 
-    /// When `true`, adapters render a close button inside this tab and
-    /// the agnostic core forwards `Delete` / `Backspace` keystrokes as
+    /// When `true`, adapters render a pointer close affordance for this
+    /// tab and the agnostic core forwards `Delete` / `Backspace` keystrokes as
     /// [`Event::CloseTab`]. Non-closable tabs ignore the keystrokes.
     pub closable: bool,
 }
@@ -279,7 +279,7 @@ pub struct TabMeta<K: TabKey> {
     /// Internal machine key derived from [`typed_key`](Self::typed_key).
     pub key: Key,
 
-    /// Resolved semantic label used for close-button names and reorder
+    /// Resolved semantic label used for close-affordance labels and reorder
     /// announcements.
     pub label_text: String,
 
@@ -417,7 +417,7 @@ pub fn drag_reorder_plan<K: TabKey>(
 /// Closure signature backing [`Messages::close_tab_label`].
 ///
 /// Receives the parent tab's visible label and the active locale, and
-/// returns the accessible name rendered on the close button
+/// returns the accessible label carried by the close affordance
 /// (e.g. `"Close Inbox"`).
 pub type CloseTabLabelFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
 
@@ -431,8 +431,8 @@ pub type ReorderAnnounceLabelFn = dyn Fn(&str, usize, usize, &Locale) -> String 
 
 /// Localizable strings for [`Tabs`](self).
 ///
-/// `close_tab_label` is the accessible name for the close button rendered
-/// inside a closable tab (default English template: `"Close {label}"`).
+/// `close_tab_label` is the accessible label for the close affordance rendered
+/// for a closable tab (default English template: `"Close {label}"`).
 /// `reorder_announce_label` is the `LiveAnnouncer` text emitted by adapters
 /// after a keyboard reorder (default: `"{label} moved to position {n} of {total}"`).
 /// The agnostic core never invokes `reorder_announce_label` itself —
@@ -440,7 +440,7 @@ pub type ReorderAnnounceLabelFn = dyn Fn(&str, usize, usize, &Locale) -> String 
 /// keeps i18n centralized.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
-    /// Builds the accessible name for a tab's close button. See
+    /// Builds the accessible label for a tab's close affordance. See
     /// [`CloseTabLabelFn`] for the closure signature.
     pub close_tab_label: MessageFn<CloseTabLabelFn>,
 
@@ -738,6 +738,16 @@ pub enum Part {
     /// The tab list (`role="tablist"`) wrapping the tab triggers.
     List,
 
+    /// A collection wrapper around the tab panels.
+    Panels,
+
+    /// A presentational row wrapper around a tab trigger and its optional
+    /// close trigger.
+    TabShell {
+        /// The key identifying the wrapped tab row.
+        tab_key: Key,
+    },
+
     /// A single tab trigger (`role="tab"`).
     Tab {
         /// The key identifying this tab. The DOM `id` of the trigger
@@ -760,7 +770,7 @@ pub enum Part {
         tab_label: Option<String>,
     },
 
-    /// A close button rendered inside a closable tab.
+    /// A pointer close affordance rendered for a closable tab.
     /// Emits `data-ars-part="tab-close-trigger"` (kebab-cased variant
     /// name).
     TabCloseTrigger {
@@ -889,6 +899,7 @@ impl ars_core::Machine for Machine {
                     let tab = tab.clone();
                     move |ctx: &mut Context| {
                         ctx.focused_tab = Some(tab.clone());
+
                         if auto {
                             ctx.value.set(Some(tab));
                         }
@@ -1088,6 +1099,7 @@ fn non_dir_context_props_changed(old: &Props, new: &Props) -> bool {
         || old.activation_mode != new.activation_mode
         || old.loop_focus != new.loop_focus
         || old.disabled_keys != new.disabled_keys
+        || old.reorderable != new.reorderable
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1407,6 +1419,29 @@ fn pick_successor(ctx: &Context, position: usize) -> Option<Key> {
         })
 }
 
+/// Returns whether a panel body should be rendered for the current presence
+/// policy.
+///
+/// The visible/hidden panel attributes are owned by [`Api::panel_attrs`].
+/// This helper owns the renderer-independent body-presence rule used by
+/// adapters when `lazy_mount` or `unmount_on_exit` changes whether inactive
+/// panel content exists in the DOM at all.
+#[must_use]
+pub const fn should_render_panel_body(
+    is_selected: bool,
+    already_selected: bool,
+    lazy_mount: bool,
+    unmount_on_exit: bool,
+) -> bool {
+    if unmount_on_exit {
+        is_selected
+    } else if lazy_mount {
+        is_selected || already_selected
+    } else {
+        true
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Api
 // ────────────────────────────────────────────────────────────────────
@@ -1543,6 +1578,33 @@ impl Api<'_> {
                 orientation_token(self.ctx.orientation),
             );
 
+        let owns = self
+            .ctx
+            .tabs
+            .iter()
+            .map(|tab_key| tab_dom_id(&self.ctx.ids, tab_key))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        if !owns.is_empty() {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Owns), owns);
+        }
+
+        attrs
+    }
+
+    /// Attributes for the panel collection wrapper.
+    ///
+    /// The wrapper has no ARIA role; it exists to give adapters and styled
+    /// templates a stable public part for positioning and spacing panels
+    /// without duplicating `data-ars-*` anatomy tokens.
+    #[must_use]
+    pub fn panels_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Panels.data_attrs();
+
+        attrs.set(scope_attr, scope_val).set(part_attr, part_val);
+
         attrs
     }
 
@@ -1612,6 +1674,51 @@ impl Api<'_> {
 
         if self.props.reorderable {
             attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), "draggable tab");
+        }
+
+        attrs
+    }
+
+    /// Attributes for the presentational shell wrapping a tab trigger and
+    /// its optional close trigger.
+    ///
+    /// `focus_visible` is the same keyboard-modality bit passed to
+    /// [`Self::tab_attrs`]. Shell attrs mirror row state that is needed to
+    /// style the whole row, including the close affordance, without selector
+    /// workarounds in adapter or Tailwind templates.
+    #[must_use]
+    pub fn tab_shell_attrs(&self, tab_key: &Key, focus_visible: bool) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::TabShell {
+            tab_key: Key::default(),
+        }
+        .data_attrs();
+
+        let is_selected = self.is_tab_selected(tab_key);
+        let is_focused = self.ctx.focused_tab.as_ref() == Some(tab_key);
+        let is_disabled = is_disabled(self.ctx, tab_key);
+        let is_closable = self.ctx.closable_tabs.contains(tab_key);
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Role, "presentation")
+            .set(HtmlAttr::Data("ars-tab-key"), dom_safe_key_token(tab_key));
+
+        if is_selected {
+            attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
+        }
+
+        if is_disabled {
+            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+        }
+
+        if is_closable {
+            attrs.set_bool(HtmlAttr::Data("ars-closable"), true);
+        }
+
+        if is_focused && focus_visible {
+            attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         }
 
         attrs
@@ -1867,7 +1974,7 @@ impl Api<'_> {
         attrs
     }
 
-    /// Attributes for the close button inside a closable tab.
+    /// Attributes for the pointer close affordance inside a closable tab.
     ///
     /// `tab_label` is the visible text label of the parent tab; the
     /// rendered `aria-label` is built via [`Messages::close_tab_label`].
@@ -1884,12 +1991,12 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
-            .set(HtmlAttr::Type, "button")
             .set(HtmlAttr::Aria(AriaAttr::Label), label)
-            // The close button is reachable from the parent tab via the
-            // `Delete` / `Backspace` keyboard shortcut and via pointer
-            // input; it is not in the natural tab sequence.
-            .set(HtmlAttr::TabIndex, "-1");
+            // The close affordance is a pointer target; keyboard users
+            // close the focused tab via Delete / Backspace on the tab
+            // trigger itself. Keeping this element non-interactive avoids
+            // invalid tablist ownership and nested-control semantics.
+            .set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
 
         attrs
     }
@@ -1962,12 +2069,14 @@ impl ConnectApi for Api<'_> {
         match part {
             Part::Root => self.root_attrs(),
             Part::List => self.list_attrs(),
-            // `tab_attrs` takes a `focus_visible` bit; the default
+            Part::Panels => self.panels_attrs(),
+            // `tab_attrs` / `tab_shell_attrs` take a `focus_visible` bit; the default
             // ConnectApi path renders without focus-visible because the
             // Part enum cannot carry runtime modality. Adapters that
-            // want focus-visible call `Api::tab_attrs` directly with the
+            // want focus-visible call the direct Api methods with the
             // ModalityContext-derived bool.
             Part::Tab { tab_key } => self.tab_attrs(&tab_key, false),
+            Part::TabShell { tab_key } => self.tab_shell_attrs(&tab_key, false),
             Part::TabIndicator => self.tab_indicator_attrs(),
             Part::Panel { tab_key, tab_label } => self.panel_attrs(&tab_key, tab_label.as_deref()),
             Part::TabCloseTrigger { tab_label } => self.close_trigger_attrs(&tab_label),

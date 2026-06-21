@@ -205,10 +205,10 @@ pub fn Swap(props: SwapSketchProps) -> Element {
 
     rsx! {
         button {
-            ..root_attrs.read().clone(),
+            ..root_attrs.cloned(),
             onclick: move |_| machine.send.call(swap::Event::Toggle),
-            span { ..on_attrs.read().clone(), {props.on_content} }
-            span { ..off_attrs.read().clone(), {props.off_content} }
+            span { ..on_attrs.cloned(), {props.on_content} }
+            span { ..off_attrs.cloned(), {props.off_content} }
         }
     }
 }

@@ -187,14 +187,14 @@ pub struct ProgressSketchProps {
 #[component]
 pub fn Progress(props: ProgressSketchProps) -> Element {
     let machine = use_machine::<progress::Machine>(progress::Props {
-        value: props.value.as_ref().map(|s| s.read().clone()),
+        value: props.value.as_ref().map(|s| s.cloned()),
         ..Default::default()
     });
     let strategy = use_style_strategy();
 
     use_effect(move || {
         if let Some(value) = props.value.as_ref() {
-            machine.send.call(progress::Event::SetValue(value.read().clone()));
+            machine.send.call(progress::Event::SetValue(value.cloned()));
         }
     });
 

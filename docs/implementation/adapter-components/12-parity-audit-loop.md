@@ -83,16 +83,33 @@ duplicated component policy to look correct, mark the row
 `WidgetOnlyWorkaround` and fix the underlying agnostic or adapter API before
 claiming parity.
 
+Also inspect the adapter API shape chosen during implementation against the
+original plan. If the final shape intentionally differs, the sketch and specs
+must name the better final contract and why it preserves the reference outcome.
+This is especially important for public anatomy: a planned standalone part may
+be the wrong boundary when it would force consumers to rebuild focus, keyboard,
+ARIA, close, drag/drop, or localized-message policy. In that case, document
+the behavior-critical subpart as private, expose the nearest safe public part
+or typed renderer, and attach tests proving the supported customization path.
+Do not leave the sketch claiming a public part exists when the implementation
+correctly chose a different boundary.
+
 ## Pass 3: A11y, I18n, And Test Proof Pass
 
 For every row that remains supported, attach proof:
 
 - adapter SSR/unit test for semantic output;
+- adapter/core test proving public part and state attrs come from the
+  agnostic `Api`, not adapter-local `AttrMap` construction or row-data
+  recomputation;
 - wasm/browser test for focused adapter wiring that SSR cannot prove, such as
   DOM-mounted attrs, generated ids, callback dispatch, reactive DOM updates,
   focus, keyboard, form, live-region, or other DOM-only behavior;
 - E2E harness assertion for the full user-visible workflow, cross-adapter
   parity, computed visual feedback, and axe-clean reached states;
+- computed cursor proof for draggable or clickable compound parts when cursor
+  state communicates pointer or drag affordance, covering the public shell and
+  every visible interactive child before and during drag;
 - widget smoke or browser evidence for the styled public demo;
 - locale evidence for every user-facing message and locale-sensitive output;
 - direction or BiDi evidence when layout, arrow keys, or interpolated user text

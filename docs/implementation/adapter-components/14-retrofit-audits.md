@@ -36,8 +36,8 @@ contract. Record intentional differences in the sketch matrix.
 
 ## Public Primitive Renames
 
-When a retrofit renames a low-level primitive or prop type, run a stale-symbol
-scan before handoff. Search at least:
+When a retrofit renames, removes, or privatizes a low-level primitive or prop
+type, run a stale-symbol scan before handoff. Search at least:
 
 - adapter source and preludes;
 - adapter tests and wasm tests;
@@ -48,9 +48,39 @@ scan before handoff. Search at least:
 - implementation sketches and usage notes.
 
 For root primitive renames, scan for old exported functions, old `Props` names,
+old public helper functions, planned-but-private part names,
 `module::OldName` call sites, deep imports, and spec snippets. Update all
 consumer-facing examples in the same PR unless the old name remains as a
 documented compatibility alias.
+
+## Closed Adapter API Split
+
+When a retrofit moves an older closed-anatomy adapter component to the current
+primitive workflow, treat it as a breaking adapter API audit unless an explicit
+compatibility alias is approved. The target shape is:
+
+- remove the public closed component from `ars-leptos` / `ars-dioxus` or hide
+  any temporary compatibility alias from the prelude;
+- expose `Root` plus the public unstyled parts that consumers can safely
+  compose without rebuilding component-owned behavior;
+- keep behavior-critical subparts private when standalone exposure would make
+  consumers own focus, keyboard, ARIA, drag/drop, close, or localized-message
+  policy; document those exceptions and their supported customization path;
+- keep one typed collection source for collection-backed components, and use
+  typed renderers when consumers need row anatomy customization without
+  repeating keys;
+- move the ready-made visual component into `ars-leptos-components` and
+  `ars-dioxus-components` as category-first CSS and Tailwind source
+  templates;
+- update plain widgets to demonstrate direct primitive composition where
+  useful, and update CSS/Tailwind widgets to consume the styled source
+  templates;
+- update E2E fixtures to exercise the adapter primitives directly, with
+  widget/browser smoke covering the styled high-level component.
+
+The retrofit sketch must explicitly say which old monolithic conclusions are
+superseded and which public names were removed, replaced, or intentionally
+kept as compatibility aliases.
 
 ## Retrofit Stop Condition
 

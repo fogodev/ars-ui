@@ -1,6 +1,6 @@
 ---
 source: crates/ars-components/src/navigation/tabs/tests.rs
-assertion_line: 810
+assertion_line: 1005
 expression: "snapshot_attrs(&service.connect(&|_| {}).close_trigger_attrs(\"Inbox\"))"
 ---
 AttrMap {
@@ -23,22 +23,18 @@ AttrMap {
         ),
         (
             Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
                 Label,
             ),
             String(
                 "Close Inbox",
-            ),
-        ),
-        (
-            TabIndex,
-            String(
-                "-1",
-            ),
-        ),
-        (
-            Type,
-            String(
-                "button",
             ),
         ),
     ],

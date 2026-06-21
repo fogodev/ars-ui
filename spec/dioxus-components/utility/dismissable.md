@@ -259,7 +259,7 @@ pub fn Region(props: RegionProps) -> Element {
     let provider_locale = resolve_locale(None);
     let resolved_locale = locale
         .as_ref()
-        .map_or(provider_locale, |locale| locale.read().clone());
+        .map_or(provider_locale, |locale| locale.cloned());
     let resolved_messages = use_messages(messages.as_ref(), Some(&resolved_locale));
     let dismiss_label =
         dismiss_label.unwrap_or_else(|| (resolved_messages.dismiss_label)(&resolved_locale));

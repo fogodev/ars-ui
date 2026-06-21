@@ -7,4 +7,5 @@
 //! templates into user projects for shadcn-style customization.
 
 pub mod input;
+pub mod navigation;
 pub mod prelude;

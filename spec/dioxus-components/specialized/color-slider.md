@@ -158,7 +158,7 @@ pub struct ColorSliderSketchProps {
 pub fn ColorSlider(props: ColorSliderSketchProps) -> Element {
     let machine = use_machine::<color_slider::Machine>(color_slider::Props { channel: props.channel, ..Default::default() });
     let root_attrs = machine.derive(|api| api.root_attrs());
-    rsx! { div { ..root_attrs.read().clone() } }
+    rsx! { div { ..root_attrs.cloned() } }
 }
 ```
 

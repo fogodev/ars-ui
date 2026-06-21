@@ -185,7 +185,7 @@ pub struct TimerSketchProps {
 pub fn Timer(props: TimerSketchProps) -> Element {
     let machine = use_machine::<timer::Machine>(timer::Props { mode: props.mode, ..Default::default() });
     let root_attrs = machine.derive(|api| api.root_attrs());
-    rsx! { div { ..root_attrs.read().clone() } }
+    rsx! { div { ..root_attrs.cloned() } }
 }
 ```
 

@@ -11,7 +11,7 @@ mod categories;
 
 use ars_dioxus::{
     ArsProvider,
-    navigation::tabs::{Tab, Tabs},
+    navigation::tabs,
     prelude::{Locale, TabKey, Translate},
 };
 use dioxus::prelude::*;
@@ -62,13 +62,16 @@ fn App() -> Element {
                         "pt-BR"
                     }
                 }
-                Tabs {
+                tabs::Root {
                     default_value: CategoryTab::Utility,
                     tabs: [
-                        Tab::new(CategoryTab::Input, InputPanel()),
-                        Tab::new(CategoryTab::Navigation, NavigationPanel()),
-                        Tab::new(CategoryTab::Utility, rsx! { UtilityPanel { locale_key } }),
+                        tabs::Tab::new(CategoryTab::Input, InputPanel()),
+                        tabs::Tab::new(CategoryTab::Navigation, NavigationPanel()),
+                        tabs::Tab::new(CategoryTab::Utility, rsx! { UtilityPanel { locale_key } }),
                     ],
+                    tabs::List::<CategoryTab> {}
+                    tabs::Panels::<CategoryTab> {}
+                    tabs::LiveRegion {}
                 }
             }
         }

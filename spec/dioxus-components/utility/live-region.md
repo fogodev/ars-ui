@@ -181,7 +181,7 @@ Dioxus effects and cleanup manage pending announcement timers.
 pub fn LiveRegion() -> Element {
     let machine = use_machine::<live_region::Machine>(live_region::Props::default());
     let attrs = machine.derive(|api| api.part_attrs(live_region::Part::Root));
-    rsx! { div { ..attrs.read().clone() } }
+    rsx! { div { ..attrs.cloned() } }
 }
 ```
 
