@@ -4755,6 +4755,83 @@ async fn custom_renderers_refresh_after_same_key_row_updates() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn custom_renderers_refresh_after_builder_based_row_updates() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, store) = owner.with(|| {
+        let parent = container();
+        let store = store_handle(three_tabs());
+        let field: tabs::Field<Vec<TestTab>> = store.tabs().into();
+
+        let render_tab = tabs::TabRenderer::from(|item: tabs::TabRenderItem<StrKey>| {
+            let key = item.key();
+
+            view! {
+                <div data-builder-tab=key data-builder-closable=item.tab.closable>
+                    {item.tab.label.run()}
+                    {move || {
+                        item.tab.close_trigger.as_ref().map(|close_trigger| close_trigger.run())
+                    }}
+                </div>
+            }
+        });
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <tabs::Root default_value="first" tabs=field>
+                    <tabs::List<StrKey> tab_row=render_tab />
+                    <tabs::Panels<StrKey> />
+                </tabs::Root>
+            }
+        });
+
+        (mount_handle, parent, store)
+    });
+
+    leptos::task::tick().await;
+
+    let first_tab = || {
+        parent
+            .query_selector(r#"[data-builder-tab="first"]"#)
+            .expect("query should succeed")
+            .expect("custom tab should render")
+    };
+
+    assert_eq!(
+        first_tab()
+            .get_attribute("data-builder-closable")
+            .as_deref(),
+        None
+    );
+    assert_eq!(first_tab().text_content().unwrap_or_default(), "First");
+
+    owner.with(|| {
+        let field = store.tabs();
+        let mut tabs = field.write();
+
+        tabs[0] = tabs[0]
+            .clone()
+            .trigger(ViewFn::from(|| view! { "First builder update" }))
+            .close_trigger(ViewFn::from(|| view! { "close glyph" }))
+            .closable(true);
+    });
+
+    leptos::task::tick().await;
+
+    assert!(
+        first_tab().get_attribute("data-builder-closable").is_some(),
+        "same-key builder update should rerun the custom tab renderer"
+    );
+    assert_eq!(
+        first_tab().text_content().unwrap_or_default(),
+        "First builder updateclose glyph",
+        "custom renderer should receive builder-updated label and close content"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
 async fn auto_direction_updates_rendered_root_dir() {
     let owner = Owner::new();
 

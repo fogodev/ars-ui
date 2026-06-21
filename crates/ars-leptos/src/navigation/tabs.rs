@@ -226,22 +226,25 @@ impl<K: TabKey> Tab<K> {
     #[must_use]
     pub fn trigger(mut self, label: impl Into<ViewFn>) -> Self {
         self.label = label.into();
+        self.bump_render_revision();
 
         self
     }
 
     /// Marks this tab as disabled.
     #[must_use]
-    pub const fn disabled(mut self, disabled: bool) -> Self {
+    pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self.bump_render_revision();
 
         self
     }
 
     /// Marks this tab as closable.
     #[must_use]
-    pub const fn closable(mut self, closable: bool) -> Self {
+    pub fn closable(mut self, closable: bool) -> Self {
         self.closable = closable;
+        self.bump_render_revision();
 
         self
     }
@@ -253,6 +256,7 @@ impl<K: TabKey> Tab<K> {
     #[must_use]
     pub fn close_trigger(mut self, close_trigger: impl Into<ViewFn>) -> Self {
         self.close_trigger = Some(close_trigger.into());
+        self.bump_render_revision();
 
         self
     }
@@ -261,8 +265,13 @@ impl<K: TabKey> Tab<K> {
     #[must_use]
     pub fn link(mut self, href: SafeUrl) -> Self {
         self.link = Some(href);
+        self.bump_render_revision();
 
         self
+    }
+
+    fn bump_render_revision(&mut self) {
+        self.render_revision = next_tab_render_revision();
     }
 }
 
