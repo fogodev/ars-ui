@@ -1,0 +1,78 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "32889381c94e",
+  "session_id": "019ed138-54c9-72c2-a294-7cd525eddd48",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-21T16:47:28.947714Z",
+  "branch": "codex/tabs-public-parts-styled-split",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "d910c7178f3f",
+  "checkpoint_transcript_start": 14443,
+  "transcript_lines_at_start": 14443,
+  "token_usage": {
+    "input_tokens": 646084,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6152576,
+    "output_tokens": 11924,
+    "api_call_count": 62
+  },
+  "session_metrics": {
+    "turn_count": 68
+  },
+  "summary": {
+    "intent": "Investigate and fix failing CI checks (Adapter Parity and Adapter Tests) on PR #732 after a prior review-fix push, then get Codex to approve the PR.",
+    "outcome": "Adapter Parity CI failure was fixed by adding a missing Leptos wasm test counterpart for a Dioxus-only smoke path, bringing the tabs parity delta from 3 to 2 (within the 2-tolerance threshold). The commit was staged and ready to push.",
+    "learnings": {
+      "repo": [
+        "The adapter parity gate counts public symbols and test attributes per adapter (Leptos vs Dioxus) per component and fails if the delta exceeds a configured tolerance (2 for tabs).",
+        "CI has distinct jobs: 'Adapter Parity' (symbol/test count symmetry) and 'Adapter Tests' (actual test execution); both were failing but only Parity was a real code issue.",
+        "Dioxus wasm tests for Tabs had more coverage than Leptos counterparts, specifically browser/wasm smoke tests for core-attribute paths, causing parity to drift.",
+        "The xtask CI commands are: `cargo xtask ci adapter-parity` for the count gate and `cargo xtask ci adapter` for the test runner.",
+        "Codex review is triggered via `@codex review` PR comment; active review is signaled by `chatgpt-codex-connector[bot]:eyes` reaction, approval by `:+1`.",
+        "Review threads must be explicitly resolved via GitHub GraphQL `resolveReviewThread` mutation after replying; resolution is not automatic."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-leptos/tests/tabs_wasm.rs",
+          "finding": "New wasm test `wasm_attrs_observable_through_machine_connect_api` added to mirror the Dioxus counterpart, fixing the parity delta from 3 to 2."
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 280,
+          "end_line": 620,
+          "finding": "Adapter parity logic lives here; counts test attributes across all adapter test files matching a component name."
+        }
+      ],
+      "workflow": [
+        "GitHub Actions job logs can return 404 blobs for in-progress or recently-failed jobs; using `gh run view --job --log` with grep filtering is more reliable than direct API log blob fetches.",
+        "Local reproduction of CI gates (`cargo xtask ci adapter-parity`) is faster and more reliable than reading truncated GitHub Actions log output.",
+        "The Adapter Tests job appeared failed in CI but passed locally — likely a hosted-runner transient or log artifact, not a real code failure.",
+        "When a wasm test sandbox blocks `wasm-bindgen-test-runner` from spawning its browser server, running with elevated permissions resolves it."
+      ]
+    },
+    "friction": [
+      "GitHub Actions job log blob returned 404 for the Adapter Tests job, requiring fallback to `gh run view --job --log` which produced extremely verbose output requiring grep filtering.",
+      "The Adapter Tests CI failure could not be definitively confirmed as a transient vs real failure because the log was inaccessible; had to rely on local reproduction passing as a proxy.",
+      "The wasm test runner was blocked by sandbox permissions on the first attempt, requiring a second run with escalation.",
+      "Polling Codex review status required manually sleeping 300s in a terminal loop; there is no push-based notification mechanism for Codex reactions.",
+      "Codex did not immediately start reviewing after the first `@codex review` trigger; a second nudge was required ~10 minutes later."
+    ],
+    "open_items": [
+      "The CI fix commit was staged but not yet pushed at the end of the transcript — PR #732 still needs the push to trigger a new CI run.",
+      "The Adapter Tests CI failure root cause was not definitively identified (transient runner issue vs real failure); worth monitoring the next CI run to confirm it self-resolves.",
+      "Codex had approved PR #732 before the CI investigation began, but the new commit will require another Codex review pass."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
