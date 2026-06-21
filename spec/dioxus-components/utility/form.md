@@ -258,7 +258,7 @@ pub fn Root(props: FormSketchProps) -> Element {
 
     rsx! {
         form {
-            ..root_attrs.read().clone(),
+            ..root_attrs.cloned(),
             onsubmit: move |ev| {
                 ev.prevent_default();
                 machine.send.call(form::Event::Submit);
@@ -266,8 +266,8 @@ pub fn Root(props: FormSketchProps) -> Element {
             onreset: move |_| machine.send.call(form::Event::Reset),
             {props.children}
             div {
-                ..status_attrs.read().clone(),
-                {status_message.read().clone()}
+                ..status_attrs.cloned(),
+                {status_message.cloned()}
             }
         }
     }

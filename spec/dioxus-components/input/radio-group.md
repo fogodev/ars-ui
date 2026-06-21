@@ -76,12 +76,12 @@ The adapter also forwards shared group props from the core contract, including l
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                  | Mode          | Sync trigger                        | Machine event / update path  | Visible effect                                |
-| ----------------------------- | ------------- | ----------------------------------- | ---------------------------- | --------------------------------------------- |
-| `value`                       | controlled    | prop change                         | `SetValue`                   | updates selected item and roving focus target |
-| `disabled` / `readonly`       | controlled    | prop change                         | `SetProps`                   | guards group and item selection               |
-| `required` / `invalid`        | controlled    | prop change                         | `SetProps`                   | updates root-level validation attrs           |
-| item activation or navigation | machine-owned | click, hidden-input change, `Space`, `Enter`, arrow keys | `SelectValue` / focus events | updates selected value and roving tabindex |
+| Adapter prop                  | Mode          | Sync trigger                                             | Machine event / update path  | Visible effect                                |
+| ----------------------------- | ------------- | -------------------------------------------------------- | ---------------------------- | --------------------------------------------- |
+| `value`                       | controlled    | prop change                                              | `SetValue`                   | updates selected item and roving focus target |
+| `disabled` / `readonly`       | controlled    | prop change                                              | `SetProps`                   | guards group and item selection               |
+| `required` / `invalid`        | controlled    | prop change                                              | `SetProps`                   | updates root-level validation attrs           |
+| item activation or navigation | machine-owned | click, hidden-input change, `Space`, `Enter`, arrow keys | `SelectValue` / focus events | updates selected value and roving tabindex    |
 
 ## 8. Registration and Cleanup Contract
 
@@ -189,10 +189,10 @@ Dioxus should keep item refs in a stable value-keyed structure, translate RTL-aw
 let machine = use_machine::<radio_group::Machine>(props);
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        label { ..machine.derive(|api| api.label_attrs()).read().clone(), {children} }
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
+        label { ..machine.derive(|api| api.label_attrs()).cloned(), {children} }
         for value in item_values {
-            div { ..machine.derive(|api| api.item_control_attrs(&value)).read().clone() }
+            div { ..machine.derive(|api| api.item_control_attrs(&value)).cloned() }
         }
     }
 }

@@ -195,9 +195,9 @@ Dioxus should keep the edit input in a stable mounted-node path, use local focus
 let machine = use_machine::<editable::Machine>(props);
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        span { ..machine.derive(|api| api.preview_attrs()).read().clone() }
-        input { ..machine.derive(|api| api.input_attrs()).read().clone() }
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
+        span { ..machine.derive(|api| api.preview_attrs()).cloned() }
+        input { ..machine.derive(|api| api.input_attrs()).cloned() }
     }
 }
 ```

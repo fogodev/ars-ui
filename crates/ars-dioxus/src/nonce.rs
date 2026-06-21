@@ -315,7 +315,7 @@ mod wasm_tests {
 
             let update_key = move |_| key.set(String::from("second-rule"));
 
-            let collected = context.rules.read().clone();
+            let collected = context.rules.cloned();
 
             let count = collected.len();
 

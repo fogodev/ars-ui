@@ -8,15 +8,14 @@ mod selection;
 mod specialized;
 mod utility;
 
-use ars_leptos::navigation::tabs::{Tab, Tabs};
-use leptos::prelude::*;
+use ars_leptos::prelude::*;
 
 use crate::text::CategoryTab;
 
 #[component]
 pub(crate) fn CategoryTabs() -> impl IntoView {
     view! {
-        <Tabs
+        <tabs::Root
             default_value=CategoryTab::Utility
             tabs=[
                 Tab::new(CategoryTab::Input, input::InputPanel),
@@ -29,6 +28,10 @@ pub(crate) fn CategoryTabs() -> impl IntoView {
                 Tab::new(CategoryTab::Specialized, specialized::SpecializedPanel),
                 Tab::new(CategoryTab::Utility, utility::UtilityPanel),
             ]
-        />
+        >
+            <tabs::List<CategoryTab> />
+            <tabs::Panels<CategoryTab> />
+            <tabs::LiveRegion />
+        </tabs::Root>
     }
 }

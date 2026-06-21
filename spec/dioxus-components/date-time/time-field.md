@@ -239,7 +239,7 @@ struct SegmentProps {
 
 #[component]
 fn Segment(props: SegmentProps) -> Element {
-    rsx! { div { ..props.machine.derive(move |api| api.segment_attrs(&props.segment.kind)).read().clone() } }
+    rsx! { div { ..props.machine.derive(move |api| api.segment_attrs(&props.segment.kind)).cloned() } }
 }
 ```
 

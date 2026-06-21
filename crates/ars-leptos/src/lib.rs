@@ -104,4 +104,21 @@ mod tests {
 
         let _ = core::any::type_name::<adapter_reactive_stores::Store<()>>();
     }
+
+    #[test]
+    fn tabs_module_is_reexported_for_prelude_consumers() {
+        use crate::prelude::*;
+
+        let _ = core::any::type_name::<Tab<&'static str>>();
+        let _ = core::any::type_name::<tabs::TabRenderItem<&'static str>>();
+        let _ = core::any::type_name::<tabs::TabRenderer<&'static str>>();
+        let _ = core::any::type_name::<tabs::TabPanelRenderer<&'static str>>();
+        let _ = core::any::type_name::<tabs::TabsSource<&'static str>>();
+        let _ =
+            core::any::type_name::<fn(&'static str, &'static str, ViewFn) -> Tab<&'static str>>();
+        let _ = tabs::Root::<&'static str>;
+        let _ = tabs::List::<&'static str>;
+        let _ = tabs::Panels::<&'static str>;
+        let _ = tabs::LiveRegion;
+    }
 }

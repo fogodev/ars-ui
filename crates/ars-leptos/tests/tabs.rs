@@ -4,13 +4,11 @@
 
 use ars_collections::TabKey;
 use ars_i18n::{IntlBackend, Locale, Translate};
-use ars_leptos::{
-    navigation::tabs::{ActivationMode, Field, Tab, Tabs},
-    reactive_stores::Store,
-};
+use ars_leptos::{navigation::tabs, reactive_stores::Store};
 use leptos::prelude::*;
 
-type TestTab = Tab<&'static str>;
+type TestTab = tabs::Tab<StrKey>;
+type StrKey = &'static str;
 
 #[derive(Store)]
 struct TabsTestState {
@@ -48,28 +46,40 @@ fn render<V: IntoView + 'static>(build: impl FnOnce() -> V) -> String {
     html
 }
 
-fn store_tabs(tabs: Vec<TestTab>) -> Field<Vec<TestTab>> {
+fn store_tabs(tabs: Vec<TestTab>) -> tabs::Field<Vec<TestTab>> {
     // The `prop(into)` on `Tabs::tabs` accepts a `Subfield` directly,
-    // but the test helper materializes the `Field` once so call-sites
+    // but the test helper materializes the `tabs::Field` once so call-sites
     // are free to pass it without further conversions.
     Store::new(TabsTestState { tabs }).tabs().into()
 }
 
+macro_rules! tabs_view {
+    (<$key:ty>; $($attrs:tt)*) => {
+        view! {
+            <tabs::Root $($attrs)*>
+                <tabs::List<$key> />
+                <tabs::Panels<$key> />
+                <tabs::LiveRegion />
+            </tabs::Root>
+        }
+    };
+}
+
 fn three_tabs() -> Vec<TestTab> {
     vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "first",
             "First",
             ViewFn::from(|| view! { "First" }),
             ViewFn::from(|| view! { <p>"Panel one"</p> }),
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "second",
             "Second",
             ViewFn::from(|| view! { "Second" }),
             ViewFn::from(|| view! { <p>"Panel two"</p> }),
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "third",
             "Third",
             ViewFn::from(|| view! { "Third" }),
@@ -78,15 +88,15 @@ fn three_tabs() -> Vec<TestTab> {
     ]
 }
 
-fn typed_tabs() -> [Tab<TypedTab>; 2] {
+fn typed_tabs() -> [tabs::Tab<TypedTab>; 2] {
     [
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             TypedTab::Alpha,
             "Alpha",
             ViewFn::from(|| view! { "Alpha" }),
             ViewFn::from(|| view! { <p>"Alpha panel"</p> }),
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             TypedTab::Beta,
             "Beta",
             ViewFn::from(|| view! { "Beta" }),
@@ -96,16 +106,115 @@ fn typed_tabs() -> [Tab<TypedTab>; 2] {
 }
 
 #[test]
-fn tab_new_uses_translated_key_as_default_label() {
+fn root_list_and_panels_render_registered_tabs_without_key_duplication() {
     let html = render(|| {
         view! {
-            <Tabs
-                default_value=TypedTab::Alpha
-                tabs=[
-                    Tab::new(TypedTab::Alpha, ViewFn::from(|| view! { <p>"Alpha panel"</p> })),
-                    Tab::new(TypedTab::Beta, ViewFn::from(|| view! { <p>"Beta panel"</p> })),
-                ]
-            />
+            <tabs::Root default_value="first" tabs=store_tabs(three_tabs())>
+                <tabs::List<StrKey> class="test-tabs__list" />
+                <tabs::Panels<StrKey> class="test-tabs__panels" />
+            </tabs::Root>
+        }
+    });
+
+    assert!(
+        html.contains(r#"data-ars-part="root""#),
+        "missing root part: {html}"
+    );
+    assert!(
+        html.contains(r#"class="test-tabs__list""#),
+        "list should accept consumer styling: {html}"
+    );
+    assert_eq!(html.matches(r#"role="tab""#).count(), 3, "{html}");
+    assert_eq!(html.matches(r#"role="tabpanel""#).count(), 3, "{html}");
+    assert!(
+        html.contains("Panel one") && html.contains("Panel two") && html.contains("Panel three"),
+        "panels should be generated from tabs::TabsSource rows: {html}"
+    );
+}
+
+#[test]
+fn typed_renderers_customize_rows_without_key_duplication() {
+    let html = render(|| {
+        let render_tab = tabs::TabRenderer::from(|item: tabs::TabRenderItem<StrKey>| {
+            let key = item.key();
+
+            view! { <div data-test-custom-tab=key>{item.tab.label.run()}</div> }
+        });
+        let render_panel = tabs::TabPanelRenderer::from(|item: tabs::TabRenderItem<StrKey>| {
+            let key = item.key();
+
+            view! { <section data-test-custom-panel=key>{item.tab.panel.run()}</section> }
+        });
+
+        view! {
+            <tabs::Root default_value="first" tabs=store_tabs(three_tabs())>
+                <tabs::List<StrKey> tab_row=render_tab />
+                <tabs::Panels<StrKey> panel=render_panel />
+            </tabs::Root>
+        }
+    });
+
+    assert_eq!(html.matches("data-test-custom-tab=").count(), 3, "{html}");
+    assert_eq!(html.matches("data-test-custom-panel=").count(), 3, "{html}");
+    assert!(
+        html.contains(r#"data-test-custom-tab="first""#)
+            && html.contains(r#"data-test-custom-panel="third""#),
+        "custom renderers should receive typed rows from tabs::TabsSource: {html}"
+    );
+}
+
+#[test]
+fn tab_shell_provides_item_context_to_trigger_and_close_trigger() {
+    let html = render(|| {
+        let mut rows = three_tabs();
+        rows[0] = rows[0].clone().closable(true);
+
+        let render_tab = tabs::TabRenderer::from(|item: tabs::TabRenderItem<StrKey>| {
+            view! {
+                <tabs::TabShell item=item class="test-tabs__shell">
+                    <tabs::Trigger<StrKey> class="test-tabs__trigger" />
+                    <tabs::CloseTrigger<StrKey> class="test-tabs__close" />
+                </tabs::TabShell>
+            }
+        });
+
+        view! {
+            <tabs::Root default_value="first" tabs=store_tabs(rows)>
+                <tabs::List<StrKey> tab_row=render_tab />
+                <tabs::Panels<StrKey> />
+            </tabs::Root>
+        }
+    });
+
+    assert!(
+        html.contains(r#"class="test-tabs__trigger""#),
+        "trigger should render from TabShell context: {html}"
+    );
+    assert!(
+        html.contains(r#"class="test-tabs__close""#),
+        "close trigger should render from TabShell context: {html}"
+    );
+    assert!(
+        html.contains(r#"aria-label="Close First""#),
+        "close trigger should receive the contextual row label: {html}"
+    );
+    assert!(
+        html.contains(r#"data-ars-part="tab-shell""#)
+            && html.contains(r#"data-ars-selected"#)
+            && html.contains(r#"data-ars-closable"#),
+        "selected closable shell should mirror row state for direct styling: {html}"
+    );
+}
+
+#[test]
+fn tab_new_uses_translated_key_as_default_label() {
+    let html = render(|| {
+        tabs_view! {<TypedTab>;
+            default_value=TypedTab::Alpha
+            tabs=[
+                tabs::Tab::new(TypedTab::Alpha, ViewFn::from(|| view! { <p>"Alpha panel"</p> })),
+                tabs::Tab::new(TypedTab::Beta, ViewFn::from(|| view! { <p>"Beta panel"</p> })),
+            ]
         }
     });
 
@@ -116,22 +225,20 @@ fn tab_new_uses_translated_key_as_default_label() {
 #[test]
 fn tab_new_static_uses_static_text_for_default_label() {
     let html = render(|| {
-        view! {
-            <Tabs
-                default_value="first"
-                tabs=[
-                    Tab::new_static(
-                        "first",
-                        "First static",
-                        ViewFn::from(|| view! { <p>"First panel"</p> }),
-                    ),
-                    Tab::new_static(
-                        "second",
-                        "Second static",
-                        ViewFn::from(|| view! { <p>"Second panel"</p> }),
-                    ),
-                ]
-            />
+        tabs_view! {<StrKey>;
+            default_value="first"
+            tabs=[
+                tabs::Tab::new_static(
+                    "first",
+                    "First static",
+                    ViewFn::from(|| view! { <p>"First panel"</p> }),
+                ),
+                tabs::Tab::new_static(
+                    "second",
+                    "Second static",
+                    ViewFn::from(|| view! { <p>"Second panel"</p> }),
+                ),
+            ]
         }
     });
 
@@ -191,21 +298,21 @@ fn rich_tabs() -> Vec<TestTab> {
     use ars_core::SafeUrl;
 
     vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "inbox",
             "Inbox",
             ViewFn::from(|| view! { "Inbox" }),
             ViewFn::from(|| view! { <p data-test="panel-inbox">"Inbox panel"</p> }),
         )
         .closable(true),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "docs",
             "Docs",
             ViewFn::from(|| view! { "Docs" }),
             ViewFn::from(|| view! { <p data-test="panel-docs">"Docs panel"</p> }),
         )
         .link(SafeUrl::from_static("/docs")),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "settings",
             "Settings",
             ViewFn::from(|| view! { "Settings" }),
@@ -218,13 +325,11 @@ fn rich_tabs() -> Vec<TestTab> {
 #[test]
 fn typed_enum_tab_keys_render_without_string_keys_at_call_site() {
     let html = render(|| {
-        view! {
-            <Tabs
-                default_value=TypedTab::Beta
-                tabs=typed_tabs()
-                on_value_change=Callback::new(|_value: Option<TypedTab>| {})
-                on_close_tab=Callback::new(|_key: TypedTab| {})
-            />
+        tabs_view! {<TypedTab>;
+            default_value=TypedTab::Beta
+            tabs=typed_tabs()
+            on_value_change=Callback::new(|_value: Option<TypedTab>| {})
+            on_close_tab=Callback::new(|_key: TypedTab| {})
         }
     });
 
@@ -235,7 +340,8 @@ fn typed_enum_tab_keys_render_without_string_keys_at_call_site() {
 
 #[test]
 fn renders_root_list_and_tab_data_attributes() {
-    let html = render(|| view! { <Tabs default_value="first" tabs=store_tabs(three_tabs()) /> });
+    let html =
+        render(|| tabs_view! {<StrKey>;  default_value="first" tabs=store_tabs(three_tabs()) });
 
     assert!(
         html.contains(r#"data-ars-scope="tabs""#),
@@ -267,21 +373,19 @@ fn renders_root_list_and_tab_data_attributes() {
 #[test]
 fn rich_tabs_ssr_structural_snapshot() {
     let html = render(|| {
-        view! {
-            <Tabs
-                default_value="docs"
-                tabs=store_tabs(rich_tabs())
-                orientation=ars_leptos::prelude::Orientation::Vertical
-                dir=ars_leptos::prelude::Direction::Rtl
-                activation_mode=ActivationMode::Manual
-                reorderable=true
-                lazy_mount=true
-            />
+        tabs_view! {<StrKey>;
+            default_value="docs"
+            tabs=store_tabs(rich_tabs())
+            orientation=ars_leptos::prelude::Orientation::Vertical
+            dir=ars_leptos::prelude::Direction::Rtl
+            activation_mode=tabs::ActivationMode::Manual
+            reorderable=true
+            lazy_mount=true
         }
     });
 
     insta::assert_snapshot!(tabs_snapshot_summary(&html), @r"
-scope=10
+scope=14
 root=1
 list=1
 tabs=3
@@ -301,7 +405,8 @@ settings_panel_body=0");
 
 #[test]
 fn first_tab_is_selected_by_default_with_roving_tabindex() {
-    let html = render(|| view! { <Tabs default_value="first" tabs=store_tabs(three_tabs()) /> });
+    let html =
+        render(|| tabs_view! {<StrKey>;  default_value="first" tabs=store_tabs(three_tabs()) });
 
     // Selected tab should have aria-selected="true" and tabindex="0".
     assert!(
@@ -341,24 +446,22 @@ fn first_tab_is_selected_by_default_with_roving_tabindex() {
 #[test]
 fn inline_array_tabs_render_without_consumer_store() {
     let html = render(|| {
-        view! {
-            <Tabs
-                default_value="first"
-                tabs=[
-                    Tab::new_with_label(
-                        "first",
-                        "First",
-                        ViewFn::from(|| view! { "First" }),
-                        ViewFn::from(|| view! { <p>"Panel one"</p> }),
-                    ),
-                    Tab::new_with_label(
-                        "second",
-                        "Second",
-                        ViewFn::from(|| view! { "Second" }),
-                        ViewFn::from(|| view! { <p>"Panel two"</p> }),
-                    ),
-                ]
-            />
+        tabs_view! {<StrKey>;
+            default_value="first"
+            tabs=[
+                tabs::Tab::new_with_label(
+                    "first",
+                    "First",
+                    ViewFn::from(|| view! { "First" }),
+                    ViewFn::from(|| view! { <p>"Panel one"</p> }),
+                ),
+                tabs::Tab::new_with_label(
+                    "second",
+                    "Second",
+                    ViewFn::from(|| view! { "Second" }),
+                    ViewFn::from(|| view! { <p>"Panel two"</p> }),
+                ),
+            ]
         }
     });
 
@@ -368,7 +471,8 @@ fn inline_array_tabs_render_without_consumer_store() {
 
 #[test]
 fn panels_render_with_aria_labelledby_and_hidden_for_unselected() {
-    let html = render(|| view! { <Tabs default_value="second" tabs=store_tabs(three_tabs()) /> });
+    let html =
+        render(|| tabs_view! {<StrKey>;  default_value="second" tabs=store_tabs(three_tabs()) });
 
     assert!(
         html.contains(r#"role="tabpanel""#),
@@ -390,7 +494,8 @@ fn panels_render_with_aria_labelledby_and_hidden_for_unselected() {
 
 #[test]
 fn aria_controls_links_tab_to_panel_via_component_ids() {
-    let html = render(|| view! { <Tabs default_value="first" tabs=store_tabs(three_tabs()) /> });
+    let html =
+        render(|| tabs_view! {<StrKey>;  default_value="first" tabs=store_tabs(three_tabs()) });
 
     // Each tab has aria-controls referencing the panel id.
     assert!(
@@ -409,12 +514,10 @@ fn aria_controls_links_tab_to_panel_via_component_ids() {
 #[test]
 fn vertical_orientation_propagates_to_aria_and_data_attrs() {
     let html = render(|| {
-        view! {
-            <Tabs
-                default_value="first"
-                tabs=store_tabs(three_tabs())
-                orientation=ars_leptos::prelude::Orientation::Vertical
-            />
+        tabs_view! {<StrKey>;
+            default_value="first"
+            tabs=store_tabs(three_tabs())
+            orientation=ars_leptos::prelude::Orientation::Vertical
         }
     });
 
@@ -431,12 +534,10 @@ fn vertical_orientation_propagates_to_aria_and_data_attrs() {
 #[test]
 fn rtl_direction_propagates_to_root_dir_attribute() {
     let html = render(|| {
-        view! {
-            <Tabs
-                default_value="first"
-                tabs=store_tabs(three_tabs())
-                dir=ars_leptos::prelude::Direction::Rtl
-            />
+        tabs_view! {<StrKey>;
+            default_value="first"
+            tabs=store_tabs(three_tabs())
+            dir=ars_leptos::prelude::Direction::Rtl
         }
     });
 
@@ -449,13 +550,13 @@ fn rtl_direction_propagates_to_root_dir_attribute() {
 #[test]
 fn disabled_tab_renders_aria_disabled() {
     let disabled_tabs = vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "ok",
             "OK",
             ViewFn::from(|| view! { "OK" }),
             ViewFn::from(|| view! { <p>"OK panel"</p> }),
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "nope",
             "Nope",
             ViewFn::from(|| view! { "Nope" }),
@@ -464,7 +565,8 @@ fn disabled_tab_renders_aria_disabled() {
         .disabled(true),
     ];
 
-    let html = render(|| view! { <Tabs default_value="ok" tabs=store_tabs(disabled_tabs) /> });
+    let html =
+        render(|| tabs_view! {<StrKey>;  default_value="ok" tabs=store_tabs(disabled_tabs) });
 
     assert!(
         html.contains(r#"aria-disabled="true""#),
@@ -481,14 +583,14 @@ fn link_tab_renders_anchor_with_href_and_tab_role() {
     use ars_core::SafeUrl;
 
     let link_tabs = vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "home",
             "Home",
             ViewFn::from(|| view! { "Home" }),
             ViewFn::from(|| view! { <p>"Home panel"</p> }),
         )
         .link(SafeUrl::from_static("/home")),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "docs",
             "Docs",
             ViewFn::from(|| view! { "Docs" }),
@@ -496,7 +598,7 @@ fn link_tab_renders_anchor_with_href_and_tab_role() {
         ),
     ];
 
-    let html = render(|| view! { <Tabs default_value="home" tabs=store_tabs(link_tabs) /> });
+    let html = render(|| tabs_view! {<StrKey>;  default_value="home" tabs=store_tabs(link_tabs) });
 
     assert!(
         html.contains("<a "),
@@ -515,7 +617,7 @@ fn link_tab_renders_anchor_with_href_and_tab_role() {
 #[test]
 fn closable_tab_renders_close_trigger_with_label() {
     let closable_tabs = vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "inbox",
             "Inbox",
             ViewFn::from(|| view! { "Inbox" }),
@@ -524,7 +626,8 @@ fn closable_tab_renders_close_trigger_with_label() {
         .closable(true),
     ];
 
-    let html = render(|| view! { <Tabs default_value="inbox" tabs=store_tabs(closable_tabs) /> });
+    let html =
+        render(|| tabs_view! {<StrKey>;  default_value="inbox" tabs=store_tabs(closable_tabs) });
 
     assert!(
         html.contains(r#"data-ars-part="tab-close-trigger""#),
@@ -534,6 +637,50 @@ fn closable_tab_renders_close_trigger_with_label() {
         html.contains(r#"aria-label="Close Inbox""#),
         "missing accessible close label: {html}"
     );
+    assert!(
+        html.contains(r#"</div><span"#),
+        "close affordance should be a sibling after the tab trigger: {html}"
+    );
+    assert!(
+        !html.contains(r#"data-ars-part="tab-close-trigger"></span></div>"#),
+        "close affordance must not be nested inside the tab trigger: {html}"
+    );
+}
+
+#[test]
+fn closable_tab_can_render_custom_close_trigger_content() {
+    let closable_tabs = vec![
+        tabs::Tab::new_with_label(
+            "inbox",
+            "Inbox",
+            ViewFn::from(|| view! { "Inbox" }),
+            ViewFn::from(|| view! { <p>"Inbox content"</p> }),
+        )
+        .closable(true)
+        .close_trigger(ViewFn::from(|| {
+            view! { <span data-test-close-icon="inbox">"Dismiss"</span> }
+        })),
+    ];
+
+    let html =
+        render(|| tabs_view! {<StrKey>;  default_value="inbox" tabs=store_tabs(closable_tabs) });
+
+    assert!(
+        html.contains(r#"data-ars-part="tab-close-trigger""#),
+        "missing close-trigger part: {html}"
+    );
+    assert!(
+        html.contains(r#"aria-label="Close Inbox""#),
+        "missing accessible close label: {html}"
+    );
+    assert!(
+        html.contains(r#"data-test-close-icon="inbox""#) && html.contains("Dismiss"),
+        "missing custom close trigger content: {html}"
+    );
+    assert!(
+        !html.contains(r#"<svg viewBox="0 0 12 12""#),
+        "custom close trigger content should replace the fallback glyph: {html}"
+    );
 }
 
 #[test]
@@ -541,7 +688,7 @@ fn closable_link_tab_renders_close_trigger_outside_anchor() {
     use ars_core::SafeUrl;
 
     let link_tabs = vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "home",
             "Home",
             ViewFn::from(|| view! { "Home" }),
@@ -551,26 +698,26 @@ fn closable_link_tab_renders_close_trigger_outside_anchor() {
         .closable(true),
     ];
 
-    let html = render(|| view! { <Tabs default_value="home" tabs=store_tabs(link_tabs) /> });
+    let html = render(|| tabs_view! {<StrKey>;  default_value="home" tabs=store_tabs(link_tabs) });
 
     assert!(
         html.contains(r#"<a"#) && html.contains(r#"href="/home""#),
         "missing linked tab anchor: {html}"
     );
     assert!(
-        html.contains(r#"</a><button"#),
-        "close trigger should be a sibling after the linked tab anchor: {html}"
+        html.contains(r#"</a><span"#),
+        "close affordance should be a sibling after the linked tab anchor: {html}"
     );
     assert!(
-        !html.contains(r#"data-ars-part="tab-close-trigger"></button></a>"#),
-        "close trigger must not be nested inside the linked tab anchor: {html}"
+        !html.contains(r#"data-ars-part="tab-close-trigger"></span></a>"#),
+        "close affordance must not be nested inside the linked tab anchor: {html}"
     );
 }
 
 #[test]
 fn reorderable_tabs_get_role_description_and_live_region() {
     let html = render(|| {
-        view! { <Tabs default_value="first" tabs=store_tabs(three_tabs()) reorderable=true /> }
+        tabs_view! {<StrKey>;  default_value="first" tabs=store_tabs(three_tabs()) reorderable=true }
     });
 
     assert!(
@@ -586,12 +733,10 @@ fn reorderable_tabs_get_role_description_and_live_region() {
 #[test]
 fn manual_activation_mode_does_not_change_default_aria_selected() {
     let html = render(|| {
-        view! {
-            <Tabs
-                default_value="first"
-                tabs=store_tabs(three_tabs())
-                activation_mode=ActivationMode::Manual
-            />
+        tabs_view! {<StrKey>;
+            default_value="first"
+            tabs=store_tabs(three_tabs())
+            activation_mode=tabs::ActivationMode::Manual
         }
     });
 
@@ -606,7 +751,7 @@ fn manual_activation_mode_does_not_change_default_aria_selected() {
 #[test]
 fn ssr_render_is_deterministic_for_identical_input() {
     let render_once =
-        || render(|| view! { <Tabs default_value="first" tabs=store_tabs(three_tabs()) /> });
+        || render(|| tabs_view! {<StrKey>;  default_value="first" tabs=store_tabs(three_tabs()) });
 
     let first = render_once();
     let second = render_once();
@@ -635,7 +780,8 @@ fn ssr_render_is_deterministic_for_identical_input() {
 
 #[test]
 fn empty_children_does_not_break_render() {
-    let html = render(|| view! { <Tabs default_value="first" tabs=store_tabs(three_tabs()) /> });
+    let html =
+        render(|| tabs_view! {<StrKey>;  default_value="first" tabs=store_tabs(three_tabs()) });
 
     assert!(
         html.contains(r#"data-ars-scope="tabs""#),
@@ -646,13 +792,13 @@ fn empty_children_does_not_break_render() {
 #[test]
 fn lazy_mount_omits_panel_body_for_inactive_tabs_on_initial_render() {
     let tabs = vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "first",
             "First",
             ViewFn::from(|| view! { "First" }),
             ViewFn::from(|| view! { <p data-test="panel-first">"First panel"</p> }),
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "second",
             "Second",
             ViewFn::from(|| view! { "Second" }),
@@ -661,7 +807,7 @@ fn lazy_mount_omits_panel_body_for_inactive_tabs_on_initial_render() {
     ];
 
     let html = render(|| {
-        view! { <Tabs default_value="first" tabs=store_tabs(tabs) lazy_mount=true /> }
+        tabs_view! {<StrKey>;  default_value="first" tabs=store_tabs(tabs) lazy_mount=true }
     });
 
     // Selected panel should render its body.

@@ -239,7 +239,7 @@ pub struct DropZoneSketchProps {
 pub fn DropZone(props: DropZoneSketchProps) -> Element {
     let machine = use_machine::<drop_zone::Machine>(drop_zone::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
-    rsx! { div { ..root_attrs.read().clone(), {props.children} } }
+    rsx! { div { ..root_attrs.cloned(), {props.children} } }
 }
 ```
 

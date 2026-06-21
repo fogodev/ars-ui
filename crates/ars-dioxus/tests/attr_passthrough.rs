@@ -11,7 +11,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use ars_dioxus::{
-    navigation::tabs::{Tab, Tabs},
+    navigation::tabs,
     utility::{
         button::Button,
         heading::{Heading, Level},
@@ -30,6 +30,34 @@ fn render_app(app: fn() -> Element) -> String {
     let mut vdom = VirtualDom::new(app);
     vdom.rebuild_in_place();
     dioxus_ssr::render(&vdom)
+}
+
+#[component]
+fn Tabs<K: ars_dioxus::TabKey>(props: tabs::RootProps<K>) -> Element {
+    rsx! {
+        tabs::Root {
+            value: props.value,
+            default_value: props.default_value,
+            tabs: props.tabs,
+            orientation: props.orientation,
+            activation_mode: props.activation_mode,
+            dir: props.dir,
+            loop_focus: props.loop_focus,
+            disallow_empty_selection: props.disallow_empty_selection,
+            lazy_mount: props.lazy_mount,
+            unmount_on_exit: props.unmount_on_exit,
+            disabled_keys: props.disabled_keys,
+            reorderable: props.reorderable,
+            on_value_change: props.on_value_change,
+            on_close_tab: props.on_close_tab,
+            on_reorder: props.on_reorder,
+            attrs: props.attrs,
+            tabs::List::<K> {}
+            tabs::Panels::<K> {}
+            tabs::LiveRegion {}
+            {props.children}
+        }
+    }
 }
 
 #[test]
@@ -250,10 +278,10 @@ fn tabs_updates_root_attrs_when_props_change() {
                 class: "{class_name}",
                 "data-state": "{class_name}",
                 tabs: [
-                    Tab::new_static("first", "First", rsx! {
+                    tabs::Tab::new_static("first", "First", rsx! {
                         p { "First panel" }
                     }),
-                    Tab::new_static("second", "Second", rsx! {
+                    tabs::Tab::new_static("second", "Second", rsx! {
                         p { "Second panel" }
                     }),
                 ],

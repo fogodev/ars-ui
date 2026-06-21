@@ -11,7 +11,7 @@ mod categories;
 
 use ars_leptos::{
     ArsProvider,
-    navigation::tabs::{Tab, Tabs},
+    navigation::tabs,
     prelude::{Locale, TabKey, Translate},
 };
 use leptos::{mount::mount_to_body, prelude::*};
@@ -67,14 +67,18 @@ fn App() -> impl IntoView {
                         "pt-BR"
                     </button>
                 </div>
-                <Tabs
+                <tabs::Root
                     default_value=CategoryTab::Utility
                     tabs=[
-                        Tab::new(CategoryTab::Input, InputPanel),
-                        Tab::new(CategoryTab::Navigation, NavigationPanel),
-                        Tab::new(CategoryTab::Utility, UtilityPanel),
+                        tabs::Tab::new(CategoryTab::Input, InputPanel),
+                        tabs::Tab::new(CategoryTab::Navigation, NavigationPanel),
+                        tabs::Tab::new(CategoryTab::Utility, UtilityPanel),
                     ]
-                />
+                >
+                    <tabs::List<CategoryTab> />
+                    <tabs::Panels<CategoryTab> />
+                    <tabs::LiveRegion />
+                </tabs::Root>
             </main>
         </ArsProvider>
     }

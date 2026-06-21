@@ -11,7 +11,7 @@ use alloc::{
 };
 use core::cell::RefCell;
 
-use ars_core::{Machine as MachineTrait, MessageFn, SendResult, Service};
+use ars_core::{AttrValue, Machine as MachineTrait, MessageFn, SendResult, Service};
 use ars_i18n::locales;
 use insta::assert_snapshot;
 
@@ -148,6 +148,19 @@ fn tablist_role_vertical() {
     );
 }
 
+#[test]
+fn tablist_owns_registered_tabs() {
+    let service = service_with_tabs(test_props(), &[key("a"), key("b")]);
+
+    let attrs = service.connect(&|_| {}).list_attrs();
+
+    assert_eq!(
+        attrs.get(&HtmlAttr::Aria(AriaAttr::Owns)),
+        Some("tabs-tab-s-61 tabs-tab-s-62"),
+        "tablist aria-owns should be derived by the agnostic core from the registered tab order"
+    );
+}
+
 // ────────────────────────────────────────────────────────────────────
 // 2. Tab triggers — aria-selected / aria-controls / focus-visible
 // ────────────────────────────────────────────────────────────────────
@@ -193,6 +206,53 @@ fn tab_attrs_focus_visible_renders_only_when_focused() {
     assert!(
         other.get(&HtmlAttr::Data("ars-focus-visible")).is_none(),
         "non-focused tab must never carry data-ars-focus-visible"
+    );
+}
+
+#[test]
+fn tab_shell_attrs_mirror_row_state_for_outer_part_styling() {
+    let mut service = service_with_registrations(
+        Props {
+            disabled_keys: BTreeSet::from([key("b")]),
+            ..test_props()
+        },
+        vec![
+            TabRegistration::closable(key("a")),
+            TabRegistration::new(key("b")),
+        ],
+    );
+
+    drop(service.send(Event::Focus(key("a"))));
+
+    let api = service.connect(&|_| {});
+    let selected = api.tab_shell_attrs(&key("a"), true);
+
+    assert_eq!(
+        selected.get_value(&HtmlAttr::Data("ars-selected")),
+        Some(&AttrValue::Bool(true)),
+        "selected shell mirrors selected state so Tailwind classes can style the full row"
+    );
+    assert_eq!(
+        selected.get_value(&HtmlAttr::Data("ars-focus-visible")),
+        Some(&AttrValue::Bool(true)),
+        "focused shell mirrors focus-visible state so the ring can include the close trigger"
+    );
+    assert_eq!(
+        selected.get_value(&HtmlAttr::Data("ars-closable")),
+        Some(&AttrValue::Bool(true)),
+        "closable shell exposes spacing state without :has selectors"
+    );
+
+    let disabled = api.tab_shell_attrs(&key("b"), true);
+
+    assert_eq!(
+        disabled.get_value(&HtmlAttr::Data("ars-disabled")),
+        Some(&AttrValue::Bool(true)),
+        "disabled shell exposes disabled state for row-level hover guards"
+    );
+    assert!(
+        disabled.get(&HtmlAttr::Data("ars-selected")).is_none(),
+        "unselected shell should not carry selected state"
     );
 }
 
@@ -404,6 +464,7 @@ fn manual_activation_enter_selects() {
     drop(service.send(Event::Focus(key("b"))));
 
     let recorder: EventRecorder = RefCell::new(Vec::new());
+
     {
         let send = |event| record(&recorder, event);
 
@@ -1013,8 +1074,10 @@ fn close_trigger_custom_messages_label() {
     let messages = Messages {
         close_tab_label: MessageFn::new(|label: &str, _locale: &Locale| {
             let mut buffer = String::with_capacity("Dismiss ".len() + label.len());
+
             buffer.push_str("Dismiss ");
             buffer.push_str(label);
+
             buffer
         }),
         ..Messages::default()
@@ -1179,12 +1242,17 @@ fn connect_api_part_attrs_round_trip() {
 
     assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
     assert_eq!(api.part_attrs(Part::List), api.list_attrs());
+    assert_eq!(api.part_attrs(Part::Panels), api.panels_attrs());
 
     // ConnectApi defaults focus_visible to false; tab_attrs is the
     // direct call adapters use when they have ModalityContext data.
     assert_eq!(
         api.part_attrs(Part::Tab { tab_key: key("a") }),
         api.tab_attrs(&key("a"), false)
+    );
+    assert_eq!(
+        api.part_attrs(Part::TabShell { tab_key: key("a") }),
+        api.tab_shell_attrs(&key("a"), false)
     );
     assert_eq!(
         api.part_attrs(Part::TabIndicator),
@@ -1658,6 +1726,7 @@ fn sync_controlled_value_plan_preserves_focus_when_focused_tab_valid() {
         value: Some(Some(key("a"))),
         ..test_props()
     };
+
     let (_, mut ctx) = Machine::init(&props, &Env::default(), &Messages::default());
 
     ctx.tabs = vec![key("b")];
@@ -1674,6 +1743,7 @@ fn sync_controlled_value_plan_downgrades_when_focused_tab_disabled() {
         value: Some(Some(key("a"))),
         ..test_props()
     };
+
     let (_, mut ctx) = Machine::init(&props, &Env::default(), &Messages::default());
 
     ctx.tabs = vec![key("b")];
@@ -1694,6 +1764,7 @@ fn next_reorder_index_public_wrapper_reports_prev_next_and_clamps() {
         },
         &[key("a"), key("b"), key("c")],
     );
+
     let api = service.connect(&|_| {});
 
     assert_eq!(api.next_reorder_index(&key("b"), true), Some(2));
@@ -3076,6 +3147,11 @@ fn on_props_changed_emits_sync_props_when_activation_mode_differs() {
 }
 
 #[test]
+fn on_props_changed_emits_sync_props_when_reorderable_differs() {
+    assert_sync_props_emitted_when(|p| p.reorderable = true);
+}
+
+#[test]
 fn on_props_changed_emits_set_direction_only_when_only_dir_differs() {
     // Direction changes are routed through `Event::SetDirection` so a
     // runtime-resolved direction can survive unrelated prop deltas while
@@ -3158,7 +3234,7 @@ fn on_props_changed_no_event_when_props_equal() {
 #[test]
 fn on_props_changed_no_event_when_only_non_context_props_differ() {
     // `id`, `value`, `default_value`, `lazy_mount`, `unmount_on_exit`,
-    // `disallow_empty_selection`, `reorderable` are not context-backed —
+    // and `disallow_empty_selection` are not context-backed —
     // changing them does NOT emit SyncProps.
     let old = test_props();
     let new = Props {
@@ -3166,7 +3242,6 @@ fn on_props_changed_no_event_when_only_non_context_props_differ() {
         lazy_mount: true,
         unmount_on_exit: true,
         disallow_empty_selection: true,
-        reorderable: true,
         ..test_props()
     };
 
@@ -3514,6 +3589,16 @@ fn tab_meta_typed_key_lookup_round_trips_adapter_key() {
 
     assert_eq!(typed_key_for_key(&rows, &key("keyboard")), Some("keyboard"));
     assert_eq!(typed_key_for_key(&rows, &key("missing")), None);
+}
+
+#[test]
+fn panel_body_presence_respects_lazy_mount_and_unmount_on_exit() {
+    assert!(should_render_panel_body(true, false, true, false));
+    assert!(should_render_panel_body(false, true, true, false));
+    assert!(!should_render_panel_body(false, false, true, false));
+    assert!(should_render_panel_body(true, false, true, true));
+    assert!(!should_render_panel_body(false, true, true, true));
+    assert!(should_render_panel_body(false, false, false, false));
 }
 
 #[test]

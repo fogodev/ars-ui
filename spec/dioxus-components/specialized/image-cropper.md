@@ -153,7 +153,7 @@ pub struct ImageCropperSketchProps {
 pub fn ImageCropper(props: ImageCropperSketchProps) -> Element {
     let machine = use_machine::<image_cropper::Machine>(image_cropper::Props { src: props.src, ..Default::default() });
     let root_attrs = machine.derive(|api| api.root_attrs());
-    rsx! { div { ..root_attrs.read().clone() } }
+    rsx! { div { ..root_attrs.cloned() } }
 }
 ```
 

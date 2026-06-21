@@ -261,7 +261,7 @@ pub fn ToggleGroup(props: ToggleGroupSketchProps) -> Element {
 
     rsx! {
         div {
-            ..root_attrs.read().clone(),
+            ..root_attrs.cloned(),
             {props.children}
         }
     }

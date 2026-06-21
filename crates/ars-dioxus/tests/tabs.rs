@@ -5,7 +5,7 @@
 use ars_collections::TabKey;
 use ars_dioxus::{
     dioxus_stores::use_store,
-    navigation::tabs::{ActivationMode, ReadStore, Tab, Tabs},
+    navigation::tabs,
     prelude::{Direction, Orientation},
 };
 use ars_i18n::{IntlBackend, Locale, Translate};
@@ -27,7 +27,8 @@ impl Translate for TypedTab {
     }
 }
 
-type TestTab = Tab<&'static str>;
+type TestTab = tabs::Tab<&'static str>;
+type StrKey = &'static str;
 
 fn render_app(app: fn() -> Element) -> String {
     let mut vdom = VirtualDom::new(app);
@@ -37,21 +38,34 @@ fn render_app(app: fn() -> Element) -> String {
     dioxus_ssr::render(&vdom)
 }
 
+macro_rules! tabs_rsx {
+    (<$key:ty>; $($attrs:tt)*) => {
+        rsx! {
+            tabs::Root {
+                $($attrs)*
+                tabs::List::<$key> {}
+                tabs::Panels::<$key> {}
+                tabs::LiveRegion {}
+            }
+        }
+    };
+}
+
 fn three_tabs() -> Vec<TestTab> {
     vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "first",
             "First",
             rsx! { "First" },
             rsx! { p { "Panel one" } },
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "second",
             "Second",
             rsx! { "Second" },
             rsx! { p { "Panel two" } },
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "third",
             "Third",
             rsx! { "Third" },
@@ -60,9 +74,9 @@ fn three_tabs() -> Vec<TestTab> {
     ]
 }
 
-fn typed_tabs() -> [Tab<TypedTab>; 2] {
+fn typed_tabs() -> [tabs::Tab<TypedTab>; 2] {
     [
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             TypedTab::Alpha,
             "Alpha",
             rsx! { "Alpha" },
@@ -70,7 +84,7 @@ fn typed_tabs() -> [Tab<TypedTab>; 2] {
                 p { "Alpha panel" }
             },
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             TypedTab::Beta,
             "Beta",
             rsx! { "Beta" },
@@ -82,20 +96,131 @@ fn typed_tabs() -> [Tab<TypedTab>; 2] {
 }
 
 #[test]
+fn root_list_and_panels_render_registered_tabs_without_key_duplication() {
+    fn app() -> Element {
+        rsx! {
+            tabs::Root { default_value: "first", tabs: use_store(three_tabs),
+                tabs::List::<StrKey> { class: "test-tabs__list" }
+                tabs::Panels::<StrKey> { class: "test-tabs__panels" }
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    assert!(
+        html.contains(r#"data-ars-part="root""#),
+        "missing root part: {html}"
+    );
+    assert!(
+        html.contains(r#"class="test-tabs__list""#),
+        "list should accept consumer styling: {html}"
+    );
+    assert_eq!(html.matches(r#"role="tab""#).count(), 3, "{html}");
+    assert_eq!(html.matches(r#"role="tabpanel""#).count(), 3, "{html}");
+    assert!(
+        html.contains("Panel one") && html.contains("Panel two") && html.contains("Panel three"),
+        "panels should be generated from tabs::TabsSource rows: {html}"
+    );
+}
+
+#[test]
+fn typed_renderers_customize_rows_without_key_duplication() {
+    fn app() -> Element {
+        rsx! {
+            tabs::Root { default_value: "first", tabs: use_store(three_tabs),
+                tabs::List::<StrKey> {
+                    tab_row: |item: tabs::TabRenderItem<StrKey>| {
+                        let key = item.key();
+
+                        rsx! {
+                            div { "data-test-custom-tab": "{key}", {item.tab.label} }
+                        }
+                    },
+                }
+                tabs::Panels::<StrKey> {
+                    panel: |item: tabs::TabRenderItem<StrKey>| {
+                        let key = item.key();
+
+                        rsx! {
+                            section { "data-test-custom-panel": "{key}", {item.tab.panel} }
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    assert_eq!(html.matches("data-test-custom-tab=").count(), 3, "{html}");
+    assert_eq!(html.matches("data-test-custom-panel=").count(), 3, "{html}");
+    assert!(
+        html.contains(r#"data-test-custom-tab="first""#)
+            && html.contains(r#"data-test-custom-panel="third""#),
+        "custom renderers should receive typed rows from tabs::TabsSource: {html}"
+    );
+}
+
+#[test]
+fn tab_shell_provides_item_context_to_trigger_and_close_trigger() {
+    fn app() -> Element {
+        rsx! {
+            tabs::Root {
+                default_value: "first",
+                tabs: use_store(|| {
+                    let mut rows = three_tabs();
+                    rows[0] = rows[0].clone().closable(true);
+                    rows
+                }),
+                tabs::List::<StrKey> {
+                    tab_row: |item: tabs::TabRenderItem<StrKey>| rsx! {
+                        tabs::TabShell { item, class: "test-tabs__shell",
+                            tabs::Trigger::<StrKey> { class: "test-tabs__trigger" }
+                            tabs::CloseTrigger::<StrKey> { class: "test-tabs__close" }
+                        }
+                    },
+                }
+                tabs::Panels::<StrKey> {}
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    assert!(
+        html.contains(r#"class="test-tabs__trigger""#),
+        "trigger should render from TabShell context: {html}"
+    );
+    assert!(
+        html.contains(r#"class="test-tabs__close""#),
+        "close trigger should render from TabShell context: {html}"
+    );
+    assert!(
+        html.contains(r#"aria-label="Close First""#),
+        "close trigger should receive the contextual row label: {html}"
+    );
+    assert!(
+        html.contains(r#"data-ars-part="tab-shell""#)
+            && html.contains(r#"data-ars-selected"#)
+            && html.contains(r#"data-ars-closable"#),
+        "selected closable shell should mirror row state for direct styling: {html}"
+    );
+}
+
+#[test]
 fn tab_new_uses_translated_key_as_default_label() {
     fn translated_tabs_app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: TypedTab::Alpha,
-                tabs: [
-                    Tab::new(TypedTab::Alpha, rsx! {
-                        p { "Alpha panel" }
-                    }),
-                    Tab::new(TypedTab::Beta, rsx! {
-                        p { "Beta panel" }
-                    }),
-                ],
-            }
+        tabs_rsx! {<TypedTab>;
+            default_value: TypedTab::Alpha,
+            tabs: [
+                tabs::Tab::new(TypedTab::Alpha, rsx! {
+                    p { "Alpha panel" }
+                }),
+                tabs::Tab::new(TypedTab::Beta, rsx! {
+                    p { "Beta panel" }
+                }),
+            ],
         }
     }
 
@@ -108,18 +233,16 @@ fn tab_new_uses_translated_key_as_default_label() {
 #[test]
 fn tab_new_static_uses_static_text_for_default_label() {
     fn static_tabs_app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: [
-                    Tab::new_static("first", "First static", rsx! {
-                        p { "First panel" }
-                    }),
-                    Tab::new_static("second", "Second static", rsx! {
-                        p { "Second panel" }
-                    }),
-                ],
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "first",
+            tabs: [
+                tabs::Tab::new_static("first", "First static", rsx! {
+                    p { "First panel" }
+                }),
+                tabs::Tab::new_static("second", "Second static", rsx! {
+                    p { "Second panel" }
+                }),
+            ],
         }
     }
 
@@ -181,21 +304,21 @@ fn rich_tabs() -> Vec<TestTab> {
     use ars_core::SafeUrl;
 
     vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "inbox",
             "Inbox",
             rsx! { "Inbox" },
             rsx! { p { "data-test": "panel-inbox", "Inbox panel" } },
         )
         .closable(true),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "docs",
             "Docs",
             rsx! { "Docs" },
             rsx! { p { "data-test": "panel-docs", "Docs panel" } },
         )
         .link(SafeUrl::from_static("/docs")),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "settings",
             "Settings",
             rsx! { "Settings" },
@@ -208,13 +331,11 @@ fn rich_tabs() -> Vec<TestTab> {
 #[test]
 fn typed_enum_tab_keys_render_without_string_keys_at_call_site() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: TypedTab::Beta,
-                tabs: typed_tabs(),
-                on_value_change: move |_value: Option<TypedTab>| {},
-                on_close_tab: move |_key: TypedTab| {},
-            }
+        tabs_rsx! {<TypedTab>;
+            default_value: TypedTab::Beta,
+            tabs: typed_tabs(),
+            on_value_change: move |_value: Option<TypedTab>| {},
+            on_close_tab: move |_key: TypedTab| {},
         }
     }
 
@@ -228,11 +349,9 @@ fn typed_enum_tab_keys_render_without_string_keys_at_call_site() {
 #[test]
 fn renders_root_list_and_tab_data_attributes() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "first",
+            tabs: use_store(three_tabs),
         }
     }
 
@@ -268,23 +387,21 @@ fn renders_root_list_and_tab_data_attributes() {
 #[test]
 fn rich_tabs_ssr_structural_snapshot() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "docs",
-                tabs: ReadStore::from(use_store(rich_tabs)),
-                orientation: Orientation::Vertical,
-                dir: Direction::Rtl,
-                activation_mode: ActivationMode::Manual,
-                reorderable: true,
-                lazy_mount: true,
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "docs",
+            tabs: use_store(rich_tabs),
+            orientation: Orientation::Vertical,
+            dir: Direction::Rtl,
+            activation_mode: tabs::ActivationMode::Manual,
+            reorderable: true,
+            lazy_mount: true,
         }
     }
 
     let html = render_app(app);
 
     insta::assert_snapshot!(tabs_snapshot_summary(&html), @r"
-scope=10
+scope=14
 root=1
 list=1
 tabs=3
@@ -305,11 +422,9 @@ settings_panel_body=0");
 #[test]
 fn first_tab_is_selected_by_default() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "first",
+            tabs: use_store(three_tabs),
         }
     }
 
@@ -331,18 +446,16 @@ fn first_tab_is_selected_by_default() {
 #[test]
 fn inline_array_tabs_render_without_consumer_store() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: [
-                    Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
-                        p { "Panel one" }
-                    }),
-                    Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
-                        p { "Panel two" }
-                    }),
-                ],
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "first",
+            tabs: [
+                tabs::Tab::new_with_label("first", "First", rsx! { "First" }, rsx! {
+                    p { "Panel one" }
+                }),
+                tabs::Tab::new_with_label("second", "Second", rsx! { "Second" }, rsx! {
+                    p { "Panel two" }
+                }),
+            ],
         }
     }
 
@@ -355,11 +468,9 @@ fn inline_array_tabs_render_without_consumer_store() {
 #[test]
 fn panels_render_with_aria_labelledby_and_hidden_for_unselected() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "second",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "second",
+            tabs: use_store(three_tabs),
         }
     }
 
@@ -385,11 +496,9 @@ fn panels_render_with_aria_labelledby_and_hidden_for_unselected() {
 #[test]
 fn aria_controls_links_tab_to_panel_via_component_ids() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "first",
+            tabs: use_store(three_tabs),
         }
     }
 
@@ -409,12 +518,10 @@ fn aria_controls_links_tab_to_panel_via_component_ids() {
 #[test]
 fn vertical_orientation_propagates_to_aria_and_data_attrs() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-                orientation: Orientation::Vertical,
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "first",
+            tabs: use_store(three_tabs),
+            orientation: Orientation::Vertical,
         }
     }
 
@@ -433,12 +540,10 @@ fn vertical_orientation_propagates_to_aria_and_data_attrs() {
 #[test]
 fn rtl_direction_propagates_to_root_dir_attribute() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-                dir: Direction::Rtl,
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "first",
+            tabs: use_store(three_tabs),
+            dir: Direction::Rtl,
         }
     }
 
@@ -454,18 +559,16 @@ fn rtl_direction_propagates_to_root_dir_attribute() {
 fn disabled_tab_renders_aria_disabled() {
     fn disabled_tabs() -> Vec<TestTab> {
         vec![
-            Tab::new_with_label("ok", "OK", rsx! { "OK" }, rsx! { p { "OK panel" } }),
-            Tab::new_with_label("nope", "Nope", rsx! { "Nope" }, rsx! { p { "Nope panel" } })
+            tabs::Tab::new_with_label("ok", "OK", rsx! { "OK" }, rsx! { p { "OK panel" } }),
+            tabs::Tab::new_with_label("nope", "Nope", rsx! { "Nope" }, rsx! { p { "Nope panel" } })
                 .disabled(true),
         ]
     }
 
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "ok",
-                tabs: ReadStore::from(use_store(disabled_tabs)),
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "ok",
+            tabs: use_store(disabled_tabs),
         }
     }
 
@@ -487,18 +590,16 @@ fn link_tab_renders_anchor_with_href_and_tab_role() {
 
     fn link_tabs() -> Vec<TestTab> {
         vec![
-            Tab::new_with_label("home", "Home", rsx! { "Home" }, rsx! { p { "Home panel" } })
+            tabs::Tab::new_with_label("home", "Home", rsx! { "Home" }, rsx! { p { "Home panel" } })
                 .link(SafeUrl::from_static("/home")),
-            Tab::new_with_label("docs", "Docs", rsx! { "Docs" }, rsx! { p { "Docs panel" } }),
+            tabs::Tab::new_with_label("docs", "Docs", rsx! { "Docs" }, rsx! { p { "Docs panel" } }),
         ]
     }
 
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "home",
-                tabs: ReadStore::from(use_store(link_tabs)),
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "home",
+            tabs: use_store(link_tabs),
         }
     }
 
@@ -522,7 +623,7 @@ fn link_tab_renders_anchor_with_href_and_tab_role() {
 fn closable_tab_renders_close_trigger_with_label() {
     fn closable_tabs() -> Vec<TestTab> {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "inbox",
                 "Inbox",
                 rsx! { "Inbox" },
@@ -533,11 +634,9 @@ fn closable_tab_renders_close_trigger_with_label() {
     }
 
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "inbox",
-                tabs: ReadStore::from(use_store(closable_tabs)),
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "inbox",
+            tabs: use_store(closable_tabs),
         }
     }
 
@@ -551,6 +650,58 @@ fn closable_tab_renders_close_trigger_with_label() {
         html.contains(r#"aria-label="Close Inbox""#),
         "missing accessible close label: {html}"
     );
+    assert!(
+        html.contains(r#"</div><span"#),
+        "close affordance should be a sibling after the tab trigger: {html}"
+    );
+    assert!(
+        !html.contains(r#"data-ars-part="tab-close-trigger"></span></div>"#),
+        "close affordance must not be nested inside the tab trigger: {html}"
+    );
+}
+
+#[test]
+fn closable_tab_can_render_custom_close_trigger_content() {
+    fn closable_tabs() -> Vec<TestTab> {
+        vec![
+            tabs::Tab::new_with_label(
+                "inbox",
+                "Inbox",
+                rsx! { "Inbox" },
+                rsx! { p { "Inbox content" } },
+            )
+            .closable(true)
+            .close_trigger(rsx! {
+                span { "data-test-close-icon": "inbox", "Dismiss" }
+            }),
+        ]
+    }
+
+    fn app() -> Element {
+        tabs_rsx! {<StrKey>;
+            default_value: "inbox",
+            tabs: use_store(closable_tabs),
+        }
+    }
+
+    let html = render_app(app);
+
+    assert!(
+        html.contains(r#"data-ars-part="tab-close-trigger""#),
+        "missing close-trigger part: {html}"
+    );
+    assert!(
+        html.contains(r#"aria-label="Close Inbox""#),
+        "missing accessible close label: {html}"
+    );
+    assert!(
+        html.contains(r#"data-test-close-icon="inbox""#) && html.contains("Dismiss"),
+        "missing custom close trigger content: {html}"
+    );
+    assert!(
+        !html.contains(r#"<svg viewBox="0 0 12 12""#),
+        "custom close trigger content should replace the fallback glyph: {html}"
+    );
 }
 
 #[test]
@@ -559,7 +710,7 @@ fn closable_link_tab_renders_close_trigger_outside_anchor() {
 
     fn link_tabs() -> Vec<TestTab> {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "home",
                 "Home",
                 rsx! { "Home" },
@@ -573,11 +724,9 @@ fn closable_link_tab_renders_close_trigger_outside_anchor() {
     }
 
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "home",
-                tabs: ReadStore::from(use_store(link_tabs)),
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "home",
+            tabs: use_store(link_tabs),
         }
     }
 
@@ -588,24 +737,22 @@ fn closable_link_tab_renders_close_trigger_outside_anchor() {
         "missing linked tab anchor: {html}"
     );
     assert!(
-        html.contains(r#"</a><button"#),
-        "close trigger should be a sibling after the linked tab anchor: {html}"
+        html.contains(r#"</a><span"#),
+        "close affordance should be a sibling after the linked tab anchor: {html}"
     );
     assert!(
-        !html.contains(r#"data-ars-part="tab-close-trigger"></button></a>"#),
-        "close trigger must not be nested inside the linked tab anchor: {html}"
+        !html.contains(r#"data-ars-part="tab-close-trigger"></span></a>"#),
+        "close affordance must not be nested inside the linked tab anchor: {html}"
     );
 }
 
 #[test]
 fn reorderable_tabs_get_role_description_and_live_region() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-                reorderable: true,
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "first",
+            tabs: use_store(three_tabs),
+            reorderable: true,
         }
     }
 
@@ -624,12 +771,10 @@ fn reorderable_tabs_get_role_description_and_live_region() {
 #[test]
 fn manual_activation_mode_does_not_change_default_aria_selected() {
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(three_tabs)),
-                activation_mode: ActivationMode::Manual,
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "first",
+            tabs: use_store(three_tabs),
+            activation_mode: tabs::ActivationMode::Manual,
         }
     }
 
@@ -647,13 +792,13 @@ fn manual_activation_mode_does_not_change_default_aria_selected() {
 fn lazy_mount_omits_panel_body_for_inactive_tabs_on_initial_render() {
     fn lazy_tabs() -> Vec<TestTab> {
         vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 rsx! { "First" },
                 rsx! { p { "data-test": "panel-first", "First panel" } },
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 rsx! { "Second" },
@@ -663,12 +808,10 @@ fn lazy_mount_omits_panel_body_for_inactive_tabs_on_initial_render() {
     }
 
     fn app() -> Element {
-        rsx! {
-            Tabs {
-                default_value: "first",
-                tabs: ReadStore::from(use_store(lazy_tabs)),
-                lazy_mount: true,
-            }
+        tabs_rsx! {<StrKey>;
+            default_value: "first",
+            tabs: use_store(lazy_tabs),
+            lazy_mount: true,
         }
     }
 

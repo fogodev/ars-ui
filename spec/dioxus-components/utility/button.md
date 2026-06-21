@@ -151,12 +151,12 @@ The native `Button` surfaces the full core prop set. `ButtonAsChild` exposes sta
 
 Controlled/uncontrolled switching is not supported after mount. `disabled` and `loading` are controlled reactive inputs; all default-only values are read at initialization unless a higher-level wrapper documents additional sync.
 
-| Adapter prop              | Mode                      | Sync trigger                      | Machine event / update path                                       | Visible effect                                                            | Notes                                                                              |
-| ------------------------- | ------------------------- | --------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `disabled`                | controlled                | signal or prop change after mount | `SetDisabled`                                                     | updates focusability, disabled semantics, and blocked activation behavior | sync is immediate and effect-based                                                 |
-| `loading`                 | controlled                | signal or prop change after mount | `SetLoading`                                                      | toggles loading indicator, busy state, and blocked activation behavior    | sync is immediate and effect-based                                                 |
-| `prevent_focus_on_press`  | adapter prop              | prop change after mount           | adapter reads current machine props before pointer press handling | affects whether `pointerdown` prevents focus movement                     | no separate machine event unless the core machine models it directly               |
-| `type`                    | non-reactive adapter prop | render time only                  | included in root props passed to the machine                      | controls native submit/reset/button behavior                              | post-mount changes should be treated as unsupported unless a wrapper reinitializes |
+| Adapter prop              | Mode                      | Sync trigger                      | Machine event / update path                                       | Visible effect                                                            | Notes                                                                                                                      |
+| ------------------------- | ------------------------- | --------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `disabled`                | controlled                | signal or prop change after mount | `SetDisabled`                                                     | updates focusability, disabled semantics, and blocked activation behavior | sync is immediate and effect-based                                                                                         |
+| `loading`                 | controlled                | signal or prop change after mount | `SetLoading`                                                      | toggles loading indicator, busy state, and blocked activation behavior    | sync is immediate and effect-based                                                                                         |
+| `prevent_focus_on_press`  | adapter prop              | prop change after mount           | adapter reads current machine props before pointer press handling | affects whether `pointerdown` prevents focus movement                     | no separate machine event unless the core machine models it directly                                                       |
+| `type`                    | non-reactive adapter prop | render time only                  | included in root props passed to the machine                      | controls native submit/reset/button behavior                              | post-mount changes should be treated as unsupported unless a wrapper reinitializes                                         |
 | `form` and form overrides | non-reactive adapter prop | render time only                  | included in root props passed to the machine                      | binds the button to the target form owner and native form override attrs  | `form_action` accepts `SafeUrl` or a static string through `FormAction`; DOM output remains sanitized by the core contract |
 
 | UI event                      | Preconditions                                          | Machine event / callback path              | Ordering notes                                                                                       | Notes                                                         |
@@ -309,7 +309,7 @@ pub fn Button(props: ButtonSketchProps) -> Element {
 
     rsx! {
         button {
-            ..root_attrs.read().clone(),
+            ..root_attrs.cloned(),
             onpointerdown: move |ev| {
                 last_pointer.set(true);
                 machine.send.call(button::Event::Press);
@@ -327,7 +327,7 @@ pub fn Button(props: ButtonSketchProps) -> Element {
             onclick: move |_| machine.send.call(button::Event::Click),
 
             if *is_loading.read() {
-                rsx! { span { ..loading_attrs.read().clone() } }
+                rsx! { span { ..loading_attrs.cloned() } }
             }
             span { "data-ars-part": "content", {props.children} }
         }

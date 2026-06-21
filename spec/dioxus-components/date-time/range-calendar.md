@@ -236,7 +236,7 @@ struct CalendarCellProps {
 #[component]
 fn CalendarCell(props: CalendarCellProps) -> Element {
     rsx! {
-        button { ..props.machine.derive(move |api| api.cell_trigger_attrs(&props.date)).read().clone() }
+        button { ..props.machine.derive(move |api| api.cell_trigger_attrs(&props.date)).cloned() }
     }
 }
 ```

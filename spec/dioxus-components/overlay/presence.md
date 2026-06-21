@@ -300,11 +300,11 @@ pub fn Presence(props: PresenceProps) -> Element {
         handle.sync_present(new_present);
     });
 
-    if handle.is_mounted.read().clone() {
+    if handle.is_mounted.cloned() {
         rsx! {
             div {
                 id: "{handle.root_id}",
-                ..handle.root_attrs.read().clone(),
+                ..handle.root_attrs.cloned(),
                 {props.children}
             }
         }

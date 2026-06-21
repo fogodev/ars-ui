@@ -64,27 +64,41 @@ fn axe_source() -> Result<String, Error> {
         })?;
     }
 
-    let url = format!("https://cdn.jsdelivr.net/npm/axe-core@{AXE_CORE_VERSION}/axe.min.js");
+    let urls = [
+        format!("https://cdn.jsdelivr.net/npm/axe-core@{AXE_CORE_VERSION}/axe.min.js"),
+        format!("https://unpkg.com/axe-core@{AXE_CORE_VERSION}/axe.min.js"),
+    ];
 
-    let status = Command::new("curl")
-        .arg("--fail")
-        .arg("--silent")
-        .arg("--show-error")
-        .arg("--location")
-        .arg("--output")
-        .arg(&path)
-        .arg(url)
-        .status()
-        .map_err(|error| Error::Command(format!("failed to spawn curl for axe-core: {error}")))?;
+    let mut errors = Vec::new();
 
-    if !status.success() {
-        return Err(Error::Command(format!(
-            "failed to download axe-core {AXE_CORE_VERSION}: curl exited with {status}"
-        )));
+    for url in urls {
+        let status = Command::new("curl")
+            .arg("--fail")
+            .arg("--silent")
+            .arg("--show-error")
+            .arg("--location")
+            .arg("--output")
+            .arg(&path)
+            .arg(&url)
+            .status()
+            .map_err(|error| {
+                Error::Command(format!("failed to spawn curl for axe-core: {error}"))
+            })?;
+
+        if status.success() {
+            return fs::read_to_string(&path).map_err(|error| {
+                Error::Command(format!("failed to read {}: {error}", path.display()))
+            });
+        }
+
+        drop(fs::remove_file(&path));
+        errors.push(format!("{url}: curl exited with {status}"));
     }
 
-    fs::read_to_string(&path)
-        .map_err(|error| Error::Command(format!("failed to read {}: {error}", path.display())))
+    Err(Error::Command(format!(
+        "failed to download axe-core {AXE_CORE_VERSION}: {}",
+        errors.join("; ")
+    )))
 }
 
 fn axe_cache_path() -> Result<PathBuf, Error> {

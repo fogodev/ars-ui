@@ -1,8 +1,5 @@
-use ars_dioxus::{
-    navigation::tabs::{Tab, Tabs},
-    prelude::{TabKey, Translate, t},
-};
-use dioxus::prelude::*;
+use ars_dioxus::prelude::*;
+use ars_dioxus_components::navigation::tabs::css::Tabs;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, TabKey, Translate)]
 #[tab_key(ordinal)]
@@ -70,8 +67,8 @@ pub(crate) enum NavigationText {
     KeyboardClosable,
 
     #[translate(
-        en_US = "Closable tabs render an extra close button and accept Delete / Backspace to fire CloseTab.",
-        pt_BR = "Abas fecháveis renderizam um botão extra de fechar e aceitam Delete / Backspace para disparar CloseTab."
+        en_US = "Closable tabs render an extra close affordance and accept Delete / Backspace to fire CloseTab.",
+        pt_BR = "Abas fecháveis renderizam um acionador extra de fechar e aceitam Delete / Backspace para disparar CloseTab."
     )]
     ClosablePanel,
 

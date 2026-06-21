@@ -8,7 +8,7 @@ mod selection;
 mod specialized;
 mod utility;
 
-use ars_leptos::navigation::tabs::{Tab, Tabs};
+use ars_leptos_components::navigation::tabs::css::{Tab, Tabs};
 use leptos::prelude::*;
 
 use crate::text::CategoryTab;

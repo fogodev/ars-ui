@@ -1,11 +1,11 @@
 //! Leptos Tabs adapter.
 //!
 //! Renders the framework-agnostic [`ars_components::navigation::tabs`]
-//! machine as a single compound `<Tabs>` Leptos component. The adapter owns
-//! the full anatomy (Root, List, Tab×N, Indicator, Panel×N, optional
-//! CloseTrigger, optional reorder live region), drives DOM focus on the
-//! [`Effect::FocusFocusedTab`] intent emitted by the core, and surfaces tab
-//! data through a per-row [`Tab`] value.
+//! machine as unstyled Leptos primitives. [`Root`] owns machine setup and
+//! typed collection state; [`List`] and [`Panels`] iterate that collection;
+//! [`TabShell`], [`Trigger`], [`CloseTrigger`], [`Panel`], and [`LiveRegion`]
+//! expose public anatomy while the adapter keeps keyboard, close, reorder,
+//! ARIA, focus, drag-image behavior, and indicator measurement centralized.
 //!
 //! See `spec/leptos-components/navigation/tabs.md` for the full adapter
 //! contract.
@@ -13,6 +13,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug},
+    marker::PhantomData,
     sync::Arc,
 };
 
@@ -61,7 +62,7 @@ use crate::{
 
 /// Semantic text source for a Leptos [`Tab`] trigger.
 ///
-/// The adapter uses this label for accessible close-button names and
+/// The adapter uses this label for close-affordance labels and
 /// reorder announcements. The default trigger rendering also uses this
 /// label unless [`Tab::trigger`] supplies richer visual content.
 #[derive(Clone)]
@@ -127,9 +128,9 @@ impl Debug for TabLabel {
 /// The agnostic core does not own per-tab labels (see
 /// `spec/components/navigation/tabs.md` §5.1) — it tracks only registration
 /// keys and the closable flag. Adapters introduce a `Tab` value to
-/// carry the rendered button/panel content, plus optional consumer
+/// carry the rendered trigger/panel content, plus optional consumer
 /// affordances (per-row `disabled` flag, optional `link` for tabs that
-/// render as `<a>` instead of `<button>`).
+/// render as `<a>` instead of the default role-backed trigger element).
 #[derive(Clone)]
 pub struct Tab<K: TabKey> {
     /// Stable identifier for the tab. Used for ARIA wiring, registration,
@@ -139,8 +140,8 @@ pub struct Tab<K: TabKey> {
     /// Visible label content rendered inside the tab trigger.
     pub label: ViewFn,
 
-    /// Semantic label text source. Used for the close-button accessible
-    /// name (`Messages::close_tab_label`) and the reorder announcement
+    /// Semantic label text source. Used for the close-affordance label
+    /// (`Messages::close_tab_label`) and the reorder announcement
     /// (`Messages::reorder_announce_label`).
     pub label_text: TabLabel,
 
@@ -151,13 +152,19 @@ pub struct Tab<K: TabKey> {
     /// `disabled_keys` prop before being threaded to the core machine.
     pub disabled: bool,
 
-    /// When `true` the adapter renders a close button inside the tab
+    /// When `true` the adapter renders a close affordance for the tab
     /// and the core forwards `Delete` / `Backspace` keystrokes as
     /// [`tabs::Event::CloseTab`].
     pub closable: bool,
 
+    /// Optional visual content rendered inside the adapter-owned close
+    /// affordance. The adapter still owns the close semantics, accessible
+    /// label, and event handling; this content is only the visible glyph or
+    /// decoration. When omitted, the adapter renders a small default glyph.
+    pub close_trigger: Option<ViewFn>,
+
     /// When `Some`, the tab renders as `<a href=…>` instead of the
-    /// default `<button>`.
+    /// default role-backed trigger element.
     pub link: Option<SafeUrl>,
 }
 
@@ -181,6 +188,7 @@ impl<K: TabKey> Tab<K> {
             panel: panel.into(),
             disabled: false,
             closable: false,
+            close_trigger: None,
             link: None,
         }
     }
@@ -201,6 +209,7 @@ impl<K: TabKey> Tab<K> {
             panel: panel.into(),
             disabled: false,
             closable: false,
+            close_trigger: None,
             link: None,
         }
     }
@@ -226,6 +235,17 @@ impl<K: TabKey> Tab<K> {
     #[must_use]
     pub const fn closable(mut self, closable: bool) -> Self {
         self.closable = closable;
+
+        self
+    }
+
+    /// Replaces the default visible close glyph for this tab.
+    ///
+    /// The adapter-owned close affordance still provides the accessible
+    /// label, click handling, and relationship to the Tabs state machine.
+    #[must_use]
+    pub fn close_trigger(mut self, close_trigger: impl Into<ViewFn>) -> Self {
+        self.close_trigger = Some(close_trigger.into());
 
         self
     }
@@ -257,6 +277,7 @@ where
             panel: panel.into(),
             disabled: false,
             closable: false,
+            close_trigger: None,
             link: None,
         }
     }
@@ -269,6 +290,7 @@ impl<K: TabKey> Debug for Tab<K> {
             .field("label_text", &self.label_text.debug_label())
             .field("disabled", &self.disabled)
             .field("closable", &self.closable)
+            .field("close_trigger", &self.close_trigger.is_some())
             .field("link", &self.link)
             .finish_non_exhaustive()
     }
@@ -296,6 +318,7 @@ struct TabsConfig<K: TabKey> {
     messages_revision: RwSignal<u64>,
 }
 
+#[derive(Clone, Copy)]
 struct TabsOptions<K: TabKey> {
     orientation: Signal<Orientation>,
     activation_mode: Signal<ActivationMode>,
@@ -316,7 +339,127 @@ struct TabsReactiveSetup<K: TabKey> {
     props_signal: Signal<Props>,
 }
 
+#[derive(Clone)]
+struct TabsContext<K: TabKey> {
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    send_with_focus_pulse: Callback<Event>,
+    config: StoredValue<TabsConfig<K>>,
+    reorder_status: RwSignal<String>,
+    drag_source: RwSignal<Option<Key>>,
+    modality_revision: RwSignal<u64>,
+    tabs_field: Field<Vec<Tab<K>>>,
+    tab_nodes: TabNodeRegistry,
+    modality: Arc<dyn ModalityContext>,
+    on_value_change: Option<Callback<Option<K>>>,
+    on_close_tab: Option<Callback<K>>,
+    on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
+    owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
+    disallow_empty_selection: Signal<bool>,
+    lazy_mount: Signal<bool>,
+    unmount_on_exit: Signal<bool>,
+    reorderable: Signal<bool>,
+    ever_selected: RwSignal<BTreeSet<Key>>,
+    indicator_revision: RwSignal<u64>,
+    platform: Arc<dyn PlatformEffects>,
+}
+
+#[derive(Clone, Copy)]
+struct TabsCommonContext {
+    reorder_status: RwSignal<String>,
+    reorderable: Signal<bool>,
+}
+
 type TabNodeRegistry = StoredValue<BTreeMap<Key, web_sys::HtmlElement>, LocalStorage>;
+
+#[derive(Clone)]
+struct TabItemContext<K: TabKey> {
+    item: TabRenderItem<K>,
+}
+
+/// Typed render item supplied by [`List`] and [`Panels`] when rendering
+/// tab-scoped parts.
+///
+/// The item carries the adapter row data selected from the root
+/// [`TabsSource`]. Consumers can pass it to [`TabShell`] or [`Panel`]
+/// without repeating or stringifying tab keys.
+#[derive(Clone, Debug)]
+pub struct TabRenderItem<K: TabKey> {
+    /// Row data for this tab in the current collection order.
+    pub tab: Tab<K>,
+}
+
+impl<K: TabKey> TabRenderItem<K> {
+    /// Returns the typed key for this render item.
+    #[must_use]
+    pub const fn key(&self) -> K {
+        self.tab.key
+    }
+}
+
+/// Typed renderer for one tab row inside [`List`].
+///
+/// The renderer receives the row selected from the root [`TabsSource`], so
+/// consumers can customize anatomy without repeating the collection order or
+/// converting typed keys to strings.
+#[derive(Clone)]
+pub struct TabRenderer<K: TabKey>(Arc<dyn Fn(TabRenderItem<K>) -> AnyView + Send + Sync>);
+
+impl<K: TabKey> TabRenderer<K> {
+    /// Renders one typed tab item.
+    #[must_use]
+    pub fn run(&self, item: TabRenderItem<K>) -> AnyView {
+        (self.0)(item)
+    }
+}
+
+impl<K, F, V> From<F> for TabRenderer<K>
+where
+    K: TabKey,
+    F: Fn(TabRenderItem<K>) -> V + Send + Sync + 'static,
+    V: IntoView + 'static,
+{
+    fn from(render: F) -> Self {
+        Self(Arc::new(move |item| render(item).into_any()))
+    }
+}
+
+impl<K: TabKey> Debug for TabRenderer<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("TabRenderer").finish_non_exhaustive()
+    }
+}
+
+/// Typed renderer for one tab panel inside [`Panels`].
+///
+/// The renderer receives the same typed row item as [`TabRenderer`], preserving
+/// a single semantic collection source for both tab triggers and panels.
+#[derive(Clone)]
+pub struct TabPanelRenderer<K: TabKey>(Arc<dyn Fn(TabRenderItem<K>) -> AnyView + Send + Sync>);
+
+impl<K: TabKey> TabPanelRenderer<K> {
+    /// Renders one typed panel item.
+    #[must_use]
+    pub fn run(&self, item: TabRenderItem<K>) -> AnyView {
+        (self.0)(item)
+    }
+}
+
+impl<K, F, V> From<F> for TabPanelRenderer<K>
+where
+    K: TabKey,
+    F: Fn(TabRenderItem<K>) -> V + Send + Sync + 'static,
+    V: IntoView + 'static,
+{
+    fn from(render: F) -> Self {
+        Self(Arc::new(move |item| render(item).into_any()))
+    }
+}
+
+impl<K: TabKey> Debug for TabPanelRenderer<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("TabPanelRenderer").finish_non_exhaustive()
+    }
+}
 
 /// Source of tab rows for the Leptos [`Tabs`] component.
 ///
@@ -384,13 +527,7 @@ impl<K: TabKey> Debug for TabsSource<K> {
     }
 }
 
-/// Renders the agnostic Tabs machine as a Leptos compound component.
-///
-/// The single component owns the full anatomy (Root, List, Tab×N,
-/// Indicator, Panel×N, optional CloseTrigger, optional reorder live
-/// region). Per-tab content comes through the [`Tab`] rows in `tabs`;
-/// `children` is rendered inside the root after the panels for any
-/// adapter-side decoration consumers want next to the tablist.
+/// Leptos compound Tabs root.
 ///
 /// `default_value` is the initial selection; `value` switches the
 /// component into controlled mode (the consumer Signal becomes the
@@ -399,9 +536,9 @@ impl<K: TabKey> Debug for TabsSource<K> {
 #[component]
 #[expect(
     clippy::too_many_arguments,
-    reason = "spec-defined component signature with one argument per documented prop"
+    reason = "spec-defined root signature with one argument per documented prop"
 )]
-pub fn Tabs<K: TabKey>(
+pub fn Root<K: TabKey>(
     /// Controlled selected tab. When `Some`, the consumer's
     /// `Signal<Option<K>>` is the authoritative source for selection.
     /// The inner `Option` lets controlled consumers express
@@ -485,7 +622,7 @@ pub fn Tabs<K: TabKey>(
     #[prop(optional, into)]
     class: Option<TextProp>,
 
-    /// Optional adapter-user content rendered inside Root after panels.
+    /// Tabs primitive children.
     #[prop(optional)]
     children: Option<Children>,
 ) -> impl IntoView {
@@ -520,6 +657,7 @@ pub fn Tabs<K: TabKey>(
     register_tabs(machine, registrations);
 
     let tab_nodes = StoredValue::new_local(BTreeMap::<Key, web_sys::HtmlElement>::new());
+
     let send_with_focus_pulse = setup_focus_dispatch(machine, &platform, tab_nodes);
 
     let reorder_status = RwSignal::new(String::new());
@@ -531,15 +669,84 @@ pub fn Tabs<K: TabKey>(
     let ever_selected = setup_lazy_mount_tracking(machine);
 
     let root_attrs = tabs_root_attrs(machine, class);
-    let list_attrs = tabs_list_attrs(machine, tabs_field);
 
     #[cfg(not(feature = "ssr"))]
-    setup_config_sync(&options, config);
+    setup_config_sync(options, config);
+
+    let TabsOptions {
+        disallow_empty_selection,
+        lazy_mount,
+        unmount_on_exit,
+        reorderable,
+        dir,
+        ..
+    } = options;
+
     #[cfg(feature = "ssr")]
     let _ = &config;
-    setup_auto_direction_effect(options.dir, machine, config, Arc::clone(&platform));
+    setup_auto_direction_effect(dir, machine, config, Arc::clone(&platform));
 
     let indicator_revision = RwSignal::new(0_u64);
+
+    provide_context(TabsCommonContext {
+        reorder_status,
+        reorderable,
+    });
+    provide_context(TabsContext {
+        machine,
+        send_with_focus_pulse,
+        config,
+        reorder_status,
+        drag_source,
+        modality_revision,
+        tabs_field,
+        tab_nodes,
+        modality,
+        on_value_change,
+        on_close_tab,
+        on_reorder,
+        owned_tabs_field,
+        disallow_empty_selection,
+        lazy_mount,
+        unmount_on_exit,
+        reorderable,
+        ever_selected,
+        indicator_revision,
+        platform,
+    });
+
+    view! { <div {..root_attrs}>{children.map(|c| c())}</div> }
+}
+
+/// Leptos Tabs list part. Renders tab rows from the root [`TabsSource`].
+#[component]
+pub fn List<K: TabKey>(
+    /// Consumer class tokens appended to the tablist.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the tablist.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
+    /// Optional typed renderer for each tab row.
+    ///
+    /// The renderer receives items from the root [`TabsSource`]. Compose
+    /// [`TabShell`], [`Trigger`], and [`CloseTrigger`] here instead of rebuilding
+    /// keyboard, selection, close, reorder, or ARIA behavior.
+    #[prop(optional, into)]
+    tab_row: Option<TabRenderer<K>>,
+) -> impl IntoView {
+    let TabsContext {
+        machine,
+        config,
+        tabs_field,
+        indicator_revision,
+        platform,
+        ..
+    } = tabs_context::<K>();
+
+    let list_attrs = tabs_list_attrs(machine, class, style);
 
     let tabs_meta = config.with_value(|cfg| cfg.tabs_meta);
 
@@ -550,78 +757,580 @@ pub fn Tabs<K: TabKey>(
         tabs_meta,
     );
 
-    let disallow_empty_selection = options.disallow_empty_selection;
-    let lazy_mount = options.lazy_mount;
-    let unmount_on_exit = options.unmount_on_exit;
-    let reorderable = options.reorderable;
-
-    // Keyed `<For>` iteration so per-tab DOM nodes (and their event
-    // handlers / refs) survive list mutations: closing or reordering a
-    // tab no longer tears down sibling rows. The element-kind bit is part
-    // of the key because switching between button-like `<div>` and link
-    // `<a>` rows must recreate the DOM node.
     let each_tabs = move || tabs_field.read().iter().cloned().collect::<Vec<_>>();
+
+    let render_button = move |tab: Tab<K>| {
+        let item = TabRenderItem { tab };
+
+        if let Some(tab_row) = &tab_row {
+            tab_row.run(item)
+        } else {
+            view! { <TabShell item=item /> }.into_any()
+        }
+    };
+
+    view! {
+        <div {..list_attrs}>
+            <For
+                each=each_tabs
+                key=|tab| (tab.key.into_key(), tab.link.is_some())
+                children=render_button
+            />
+            <Indicator attrs=tab_indicator_attrs style=indicator_style />
+        </div>
+    }
+}
+
+/// Leptos Tabs panels collection. Renders one panel for every registered row.
+#[component]
+pub fn Panels<K: TabKey>(
+    /// Consumer class tokens appended to the panels wrapper.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the panels wrapper.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
+    /// Optional typed renderer for each panel row.
+    ///
+    /// The renderer receives items from the root [`TabsSource`]. Compose
+    /// [`Panel`] here instead of repeating the tab collection manually.
+    #[prop(optional, into)]
+    panel: Option<TabPanelRenderer<K>>,
+) -> impl IntoView {
+    let TabsContext {
+        tabs_field,
+        machine,
+        ..
+    } = tabs_context::<K>();
+
     let each_panels = move || tabs_field.read().iter().cloned().collect::<Vec<_>>();
 
-    let render_button = {
+    let attrs = panel_collection_attrs(machine, class, style);
+
+    view! {
+        <div {..attrs}>
+            <For
+                each=each_panels
+                key=|tab| tab.key.into_key()
+                children=move |tab| {
+                    let item = TabRenderItem { tab };
+                    if let Some(render_panel_item) = &panel {
+                        render_panel_item.run(item)
+                    } else {
+                        view! { <Panel item /> }.into_any()
+                    }
+                }
+            />
+        </div>
+    }
+}
+
+/// Leptos Tabs shell part for one tab row.
+///
+/// The shell renders the trigger, optional close affordance, DOM refs,
+/// events, and drag-image wiring for the supplied [`TabRenderItem`].
+#[component]
+pub fn TabShell<K: TabKey>(
+    /// Typed item supplied by the root collection renderer.
+    item: TabRenderItem<K>,
+
+    /// Consumer class tokens appended to the tab shell.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the tab shell.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
+    /// Optional custom shell children. When omitted, the shell renders the
+    /// default [`Trigger`] plus [`CloseTrigger`] composition.
+    #[prop(optional)]
+    children: Option<Children>,
+) -> impl IntoView {
+    let TabsContext {
+        machine,
+        send_with_focus_pulse,
+        config,
+        reorder_status,
+        drag_source,
+        tab_nodes,
+        on_reorder,
+        owned_tabs_field,
+        indicator_revision,
+        reorderable,
+        modality,
+        modality_revision,
+        ..
+    } = tabs_context::<K>();
+
+    let key = Arc::new(item.tab.key.into_key());
+
+    let shell_attrs = crate::apply_part_attrs(
+        reactive_tab_shell_attrs(machine, (*key).clone(), modality, modality_revision),
+        class,
+        style,
+    );
+
+    let is_draggable = move || reorderable.get().to_string();
+
+    let on_dragstart = {
+        let key = Arc::clone(&key);
+        move |event: web_sys::DragEvent| {
+            if config.with_value(|cfg| cfg.reorderable) {
+                set_tab_shell_drag_image(&event);
+                set_tab_shell_dragging(&event);
+                drag_source.set(Some((*key).clone()));
+            }
+        }
+    };
+
+    let on_dragend = move |event: web_sys::DragEvent| {
+        clear_tab_shell_dragging(&event);
+        drag_source.set(None);
+    };
+
+    let on_dragover = {
+        let key = Arc::clone(&key);
+        move |event: web_sys::DragEvent| {
+            if can_accept_drag(config, drag_source, &key) {
+                event.prevent_default();
+            }
+        }
+    };
+
+    let on_drop = {
+        let key = Arc::clone(&key);
+        move |event: web_sys::DragEvent| {
+            clear_tab_shell_dragging(&event);
+            handle_tab_drop(
+                &event,
+                &key,
+                machine,
+                send_with_focus_pulse,
+                config,
+                drag_source,
+                reorder_status,
+                tab_nodes,
+                on_reorder,
+                owned_tabs_field,
+                indicator_revision,
+            );
+        }
+    };
+
+    provide_context(TabItemContext { item });
+
+    view! {
+        <div
+            {..shell_attrs}
+            on:dragstart=on_dragstart
+            on:dragover=on_dragover
+            on:drop=on_drop
+            on:dragend=on_dragend
+            draggable=is_draggable
+        >
+            {children
+                .map_or_else(
+                    || {
+                        Either::Left(
+                            view! {
+                                <Trigger<K> />
+                                <CloseTrigger<K> />
+                            },
+                        )
+                    },
+                    |children| Either::Right(children()),
+                )}
+        </div>
+    }
+}
+
+/// Leptos Tabs trigger part for one tab row.
+#[component]
+pub fn Trigger<K: TabKey>(
+    /// Internal marker that keeps the key type attached to the generated
+    /// component props after the row item moved into [`TabShell`] context.
+    #[prop(optional, default = PhantomData)]
+    _key: PhantomData<K>,
+
+    /// Consumer class tokens appended to the trigger.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the trigger.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+) -> impl IntoView {
+    let TabsContext {
+        machine,
+        send_with_focus_pulse,
+        config,
+        reorder_status,
+        modality_revision,
+        tabs_field,
+        tab_nodes,
+        modality,
+        on_value_change,
+        on_close_tab,
+        on_reorder,
+        owned_tabs_field,
+        disallow_empty_selection,
+        indicator_revision,
+        ..
+    } = tabs_context::<K>();
+    let TabItemContext {
+        item: TabRenderItem { tab },
+    } = use_context::<TabItemContext<K>>()
+        .expect("<tabs::Trigger> must be rendered inside <tabs::TabShell>");
+
+    let key = Arc::new(tab.key.into_key());
+    let tab_attrs = crate::apply_part_attrs(
+        reactive_tab_attrs(
+            machine,
+            Arc::clone(&key),
+            Arc::clone(&modality),
+            modality_revision,
+        ),
+        class,
+        style,
+    );
+
+    let link = tab.link.clone();
+    let prevent_default_on_click = link.is_some();
+    let on_click = {
+        let key = Arc::clone(&key);
+        move |event: web_sys::MouseEvent| {
+            if prevent_default_on_click {
+                event.prevent_default();
+            }
+
+            select_and_emit_value_change(
+                machine,
+                send_with_focus_pulse,
+                &key,
+                on_value_change,
+                config,
+            );
+        }
+    };
+
+    let on_pointerdown = {
         let modality = Arc::clone(&modality);
-        move |tab: Tab<K>| {
-            render_tab_button(
-                tab,
+        move |event: web_sys::PointerEvent| {
+            modality.on_pointer_down(pointer_type_from_leptos(&event.pointer_type()));
+            bump_revision(modality_revision);
+        }
+    };
+
+    let on_focus = {
+        let key = Arc::clone(&key);
+        move |_event: web_sys::FocusEvent| {
+            focus_event_and_emit_value_change(
+                machine,
+                send_with_focus_pulse,
+                &key,
+                on_value_change,
+                config,
+            );
+        }
+    };
+
+    let on_blur = move |_event: web_sys::FocusEvent| {
+        send_with_focus_pulse.run(Event::Blur);
+    };
+
+    let on_keydown = {
+        let key = Arc::clone(&key);
+        let fallback = tab.clone();
+        let modality = Arc::clone(&modality);
+        move |event: web_sys::KeyboardEvent| {
+            let label_text = current_tab_by_key(tabs_field, tab.key, &fallback)
+                .label_text
+                .resolve();
+
+            bump_revision(modality_revision);
+
+            handle_tab_keydown(
+                &event,
+                &key,
+                &label_text,
                 machine,
                 send_with_focus_pulse,
                 config,
                 reorder_status,
-                drag_source,
-                modality_revision,
-                tabs_field,
-                tab_nodes,
-                &modality,
                 on_value_change,
                 on_close_tab,
                 on_reorder,
+                &modality,
+                tab_nodes,
                 owned_tabs_field,
                 disallow_empty_selection,
-                reorderable,
                 indicator_revision,
-            )
+            );
         }
     };
 
-    let render_panel = move |tab: Tab<K>| {
-        render_tab_panel(
-            tab,
-            machine,
-            lazy_mount,
-            unmount_on_exit,
-            ever_selected,
-            tabs_field,
-        )
-    };
+    let current_tab = move || current_tab_by_key(tabs_field, tab.key, &tab).label.run();
+
+    if let Some(href) = link {
+        Either::Left(view! {
+            <a
+                {..tab_attrs}
+                node_ref=tab_anchor_node_ref(tab_nodes, (*key).clone())
+                href=href.as_str().to_string()
+                on:click=on_click
+                on:focus=on_focus
+                on:blur=on_blur
+                on:keydown=on_keydown
+                on:pointerdown=on_pointerdown
+            >
+                {current_tab}
+            </a>
+        })
+    } else {
+        Either::Right(view! {
+            <div
+                {..tab_attrs}
+                node_ref=tab_div_node_ref(tab_nodes, (*key).clone())
+                on:click=on_click
+                on:focus=on_focus
+                on:blur=on_blur
+                on:keydown=on_keydown
+                on:pointerdown=on_pointerdown
+            >
+                {current_tab}
+            </div>
+        })
+    }
+}
+
+/// Leptos Tabs close affordance part for one tab row.
+#[component]
+pub fn CloseTrigger<K: TabKey>(
+    /// Internal marker that keeps the key type attached to the generated
+    /// component props after the row item moved into [`TabShell`] context.
+    #[prop(optional, default = PhantomData)]
+    _key: PhantomData<K>,
+
+    /// Consumer class tokens appended to the close affordance.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the close affordance.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+) -> impl IntoView {
+    let TabsContext {
+        machine,
+        send_with_focus_pulse,
+        config,
+        tabs_field,
+        tab_nodes,
+        on_value_change,
+        on_close_tab,
+        owned_tabs_field,
+        disallow_empty_selection,
+        ..
+    } = tabs_context::<K>();
+
+    let TabItemContext {
+        item: TabRenderItem { tab },
+    } = use_context::<TabItemContext<K>>()
+        .expect("<tabs::CloseTrigger> must be rendered inside <tabs::TabShell>");
+
+    let key = Arc::new(tab.key.into_key());
+    let tab = Arc::new(tab);
+    move || {
+        let is_closable = config.with_value(|cfg| {
+            cfg.messages_revision.get();
+
+            cfg.tabs_meta
+                .get()
+                .iter()
+                .any(|meta| meta.key == *key && meta.closable && !meta.disabled)
+        });
+
+        if !is_closable {
+            return None;
+        }
+
+        let close_attrs = crate::apply_part_attrs(
+            machine.with_api_snapshot({
+                let tab = Arc::clone(&tab);
+                move |api| {
+                    let label_text = current_tab_by_key(tabs_field, tab.key, &tab)
+                        .label_text
+                        .resolve();
+
+                    api.close_trigger_attrs(&label_text)
+                }
+            }),
+            class.clone(),
+            style.clone(),
+        );
+
+        Some(view! {
+            <span
+                {..close_attrs}
+                on:click={
+                    let key = Arc::clone(&key);
+                    let typed_key = tab.key;
+                    move |event: web_sys::MouseEvent| {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        let successor = selected_close_successor(machine, &key);
+                        emit_close_request(
+                            machine,
+                            send_with_focus_pulse,
+                            on_close_tab,
+                            on_value_change,
+                            typed_key,
+                            &key,
+                            successor.as_ref().map(|(successor_key, _)| successor_key.clone()),
+                            config,
+                            owned_tabs_field,
+                            disallow_empty_selection,
+                        );
+                        if let Some((successor_key, element_id)) = successor {
+                            defer_focus_tab_node_or_id(tab_nodes, successor_key, element_id);
+                        }
+                    }
+                }
+            >
+                {
+                    let tab = Arc::clone(&tab);
+                    move || {
+                        current_tab_by_key(tabs_field, tab.key, &tab)
+                            .close_trigger
+                            .unwrap_or_else(|| ViewFn::from(|| {
+                                view! {
+                                    <svg
+                                        viewBox="0 0 12 12"
+                                        width="12"
+                                        height="12"
+                                        aria-hidden="true"
+                                        focusable="false"
+                                    >
+                                        <path
+                                            d="M3 3 L9 9 M9 3 L3 9"
+                                            stroke="currentColor"
+                                            stroke-width="1.8"
+                                            stroke-linecap="round"
+                                        />
+                                    </svg>
+                                }
+                            }))
+                            .run()
+                    }
+                }
+            </span>
+        })
+    }
+}
+
+/// Leptos Tabs panel part for one tab row.
+#[component]
+pub fn Panel<K: TabKey>(
+    /// Typed item supplied by the root collection renderer.
+    item: TabRenderItem<K>,
+
+    /// Consumer class tokens appended to the panel.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the panel.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+) -> impl IntoView {
+    let TabRenderItem { tab } = item;
+
+    let TabsContext {
+        machine,
+        tabs_field,
+        lazy_mount,
+        unmount_on_exit,
+        ever_selected,
+        ..
+    } = tabs_context::<K>();
+
+    let panel_attrs = crate::apply_part_attrs(
+        reactive_panel_attrs(machine, tab.key.into_key()),
+        class,
+        style,
+    );
+
+    let is_selected_memo = machine.derive(move |api| api.is_tab_selected(&tab.key.into_key()));
+    let key = tab.key.into_key();
 
     view! {
-        <div {..root_attrs}>
-            <div {..list_attrs}>
-                <For
-                    each=each_tabs
-                    key=|tab| (tab.key.into_key(), tab.link.is_some())
-                    children=render_button
-                />
-                <span {..tab_indicator_attrs} style=indicator_style></span>
-            </div>
-            <For each=each_panels key=|tab| tab.key.into_key() children=render_panel />
-            {children.map(|c| c())}
-            <Show when=move || reorderable.get()>
-                <div
-                    aria-live="polite"
-                    aria-atomic="true"
-                    style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;"
-                >
-                    {reorder_status}
-                </div>
-            </Show>
+        <div {..panel_attrs}>
+            {move || {
+                tabs::should_render_panel_body(
+                        is_selected_memo.get(),
+                        ever_selected.with(|set| set.contains(&key)),
+                        lazy_mount.get(),
+                        unmount_on_exit.get(),
+                    )
+                    .then(|| current_tab_by_key(tabs_field, tab.key, &tab).panel.run())
+            }}
         </div>
     }
+}
+
+/// Leptos Tabs indicator part.
+#[component]
+fn Indicator(
+    /// Attributes produced by the agnostic Tabs API for the indicator node.
+    attrs: Vec<crate::LeptosAttribute>,
+
+    /// Inline style text measured by the adapter.
+    style: RwSignal<String>,
+) -> impl IntoView {
+    view! { <span {..attrs} style=style></span> }
+}
+
+/// Leptos Tabs reorder announcement live region.
+#[component]
+pub fn LiveRegion() -> impl IntoView {
+    let TabsCommonContext {
+        reorder_status,
+        reorderable,
+    } = use_context::<TabsCommonContext>()
+        .expect("<tabs::LiveRegion> must be rendered inside <tabs::Root>");
+
+    view! {
+        <Show when=move || reorderable.get()>
+            <div
+                aria-live="polite"
+                aria-atomic="true"
+                style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;"
+            >
+                {reorder_status}
+            </div>
+        </Show>
+    }
+}
+
+fn tabs_context<K: TabKey>() -> TabsContext<K> {
+    use_context::<TabsContext<K>>().expect("Tabs part must be rendered inside <tabs::Root>")
+}
+
+fn panel_collection_attrs(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    class: Option<TextProp>,
+    style: Option<TextProp>,
+) -> Vec<crate::LeptosAttribute> {
+    crate::apply_part_attrs(
+        machine.with_api_snapshot(panels_attrs_from_api),
+        class,
+        style,
+    )
+}
+
+fn panels_attrs_from_api(api: &tabs::Api<'_>) -> AttrMap {
+    api.panels_attrs()
 }
 
 #[expect(
@@ -674,7 +1383,7 @@ fn setup_tabs_reactivity<K: TabKey>(
         messages_revision: RwSignal::new(0),
     });
 
-    let props_signal = tabs_props_signal(id, default_value, value, tabs_field, options);
+    let props_signal = tabs_props_signal(id, default_value, value, tabs_field, *options);
 
     TabsReactiveSetup {
         tabs_field,
@@ -717,35 +1426,35 @@ fn tabs_props_signal<K: TabKey>(
     default_value: K,
     value: Option<Signal<Option<K>>>,
     tabs: Field<Vec<Tab<K>>>,
-    options: &TabsOptions<K>,
+    TabsOptions {
+        orientation,
+        activation_mode,
+        dir,
+        loop_focus,
+        disallow_empty_selection,
+        lazy_mount,
+        unmount_on_exit,
+        disabled_keys,
+        reorderable,
+    }: TabsOptions<K>,
 ) -> Signal<Props> {
-    let disabled_keys = options.disabled_keys;
     let initial_disabled = disabled_keys
         .with_untracked(|extra| aggregate_disabled_keys_from_tabs_untracked(tabs, extra));
 
     let base_props = Props::new()
         .id(id)
         .default_value(Some(default_value.into_key()))
-        .orientation(options.orientation.get_untracked())
-        .activation_mode(options.activation_mode.get_untracked())
-        .dir(options.dir.get_untracked())
-        .loop_focus(options.loop_focus.get_untracked())
-        .disallow_empty_selection(options.disallow_empty_selection.get_untracked())
-        .lazy_mount(options.lazy_mount.get_untracked())
-        .unmount_on_exit(options.unmount_on_exit.get_untracked())
+        .orientation(orientation.get_untracked())
+        .activation_mode(activation_mode.get_untracked())
+        .dir(dir.get_untracked())
+        .loop_focus(loop_focus.get_untracked())
+        .disallow_empty_selection(disallow_empty_selection.get_untracked())
+        .lazy_mount(lazy_mount.get_untracked())
+        .unmount_on_exit(unmount_on_exit.get_untracked())
         .disabled_keys(initial_disabled)
-        .reorderable(options.reorderable.get_untracked());
+        .reorderable(reorderable.get_untracked());
 
     let props_for_signal = base_props.clone();
-
-    let orientation = options.orientation;
-    let activation_mode = options.activation_mode;
-    let dir = options.dir;
-    let loop_focus = options.loop_focus;
-    let disallow_empty_selection = options.disallow_empty_selection;
-    let lazy_mount = options.lazy_mount;
-    let unmount_on_exit = options.unmount_on_exit;
-    let reorderable = options.reorderable;
 
     Signal::derive(move || {
         let mut props = props_for_signal.clone();
@@ -813,10 +1522,12 @@ fn setup_messages_sync<K: TabKey>(
 
         if changed {
             previous.set_value(Some(next.clone()));
+
             machine.send.run(Event::SyncMessages {
                 locale: next.0,
                 messages: next.1,
             });
+
             config.with_value(|cfg| cfg.messages_revision.update(|revision| *revision += 1));
         }
     };
@@ -832,12 +1543,16 @@ fn setup_messages_sync<K: TabKey>(
 }
 
 #[cfg(not(feature = "ssr"))]
-fn setup_config_sync<K: TabKey>(options: &TabsOptions<K>, config: StoredValue<TabsConfig<K>>) {
-    let orientation = options.orientation;
-    let activation_mode = options.activation_mode;
-    let dir = options.dir;
-    let reorderable = options.reorderable;
-
+fn setup_config_sync<K: TabKey>(
+    TabsOptions {
+        orientation,
+        activation_mode,
+        dir,
+        reorderable,
+        ..
+    }: TabsOptions<K>,
+    config: StoredValue<TabsConfig<K>>,
+) {
     Effect::new(move |_| {
         config.update_value(|cfg| {
             cfg.orientation = orientation.get();
@@ -878,6 +1593,7 @@ fn setup_focus_dispatch(
             };
 
             platform.focus_element_by_id(&element_id);
+
             focus_tab_element_by_id(&element_id);
         });
     }
@@ -967,20 +1683,19 @@ fn tabs_root_attrs(
     clippy::redundant_closure_for_method_calls,
     reason = "method-pointer form fails HRTB inference for Api::list_attrs"
 )]
-fn tabs_list_attrs<K: TabKey>(
+fn tabs_list_attrs(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    tabs_field: Field<Vec<Tab<K>>>,
+    class: Option<TextProp>,
+    style: Option<TextProp>,
 ) -> Vec<crate::LeptosAttribute> {
     let mut attrs = machine.with_api_snapshot(|api| api.list_attrs());
 
-    let owns = machine.derive(move |api| {
-        tabs_field
-            .read()
-            .iter()
-            .filter_map(|tab| tab_id_from_api(api, &tab.key.into_key()))
-            .collect::<Vec<_>>()
-            .join(" ")
+    let owns = machine.derive(|api| {
+        api.list_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::Owns))
+            .map(str::to_owned)
     });
+
     let orientation = machine.derive(|api| {
         api.list_attrs()
             .get(&HtmlAttr::Aria(AriaAttr::Orientation))
@@ -991,14 +1706,14 @@ fn tabs_list_attrs<K: TabKey>(
     attrs
         .set(
             HtmlAttr::Aria(AriaAttr::Owns),
-            AttrValue::reactive(move || owns.get()),
+            AttrValue::reactive_optional(move || owns.get()),
         )
         .set(
             HtmlAttr::Aria(AriaAttr::Orientation),
             AttrValue::reactive(move || orientation.get()),
         );
 
-    attr_map_to_leptos_inline_attrs(attrs)
+    crate::apply_part_attrs(attrs, class, style)
 }
 
 fn tab_id_from_api(api: &tabs::Api<'_>, key: &Key) -> Option<String> {
@@ -1083,275 +1798,8 @@ fn setup_tab_indicator<K: TabKey>(
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Tab button rendering
+// Tab row rendering
 // ────────────────────────────────────────────────────────────────────
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "tab rendering needs machine, event callbacks, and reactive store handles"
-)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "Leptos tab rendering keeps related DOM event closures in one helper"
-)]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Leptos keyed For hands owned rows to child renderers, and closures keep cloned fallbacks"
-)]
-fn render_tab_button<K: TabKey>(
-    tab: Tab<K>,
-    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    send: Callback<Event>,
-    config: StoredValue<TabsConfig<K>>,
-    reorder_status: RwSignal<String>,
-    drag_source: RwSignal<Option<Key>>,
-    modality_revision: RwSignal<u64>,
-    tabs_field: Field<Vec<Tab<K>>>,
-    tab_nodes: TabNodeRegistry,
-    modality: &Arc<dyn ModalityContext>,
-    on_value_change: Option<Callback<Option<K>>>,
-    on_close_tab: Option<Callback<K>>,
-    on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
-    owned_tabs_field: Option<Field<Vec<Tab<K>>>>,
-    disallow_empty_selection: Signal<bool>,
-    reorderable: Signal<bool>,
-    indicator_revision: RwSignal<u64>,
-) -> impl IntoView + use<K> {
-    let typed_key = tab.key;
-    let key = typed_key.into_key();
-
-    let tab_attrs = attr_map_to_leptos_inline_attrs(reactive_tab_attrs(
-        machine,
-        &key,
-        Arc::clone(modality),
-        modality_revision,
-        config,
-    ));
-
-    let link = tab.link.clone();
-
-    let prevent_default_on_click = link.is_some();
-
-    let on_click = {
-        let key = key.clone();
-        move |event: web_sys::MouseEvent| {
-            if prevent_default_on_click {
-                event.prevent_default();
-            }
-
-            select_and_emit_value_change(machine, send, &key, on_value_change, config);
-        }
-    };
-
-    let on_pointerdown = {
-        let modality = Arc::clone(modality);
-        move |event: web_sys::PointerEvent| {
-            modality.on_pointer_down(pointer_type_from_leptos(&event.pointer_type()));
-            bump_revision(modality_revision);
-        }
-    };
-
-    let on_focus = {
-        let key = key.clone();
-        move |_event: web_sys::FocusEvent| {
-            focus_event_and_emit_value_change(machine, send, &key, on_value_change, config);
-        }
-    };
-
-    let on_blur = move |_event: web_sys::FocusEvent| {
-        send.run(Event::Blur);
-    };
-
-    let on_keydown = {
-        let key = key.clone();
-        let fallback = tab.clone();
-        let modality = Arc::clone(modality);
-        move |event: web_sys::KeyboardEvent| {
-            let label_text = current_tab_by_key(tabs_field, typed_key, &fallback)
-                .label_text
-                .resolve();
-            bump_revision(modality_revision);
-
-            handle_tab_keydown(
-                &event,
-                &key,
-                &label_text,
-                machine,
-                send,
-                config,
-                reorder_status,
-                on_value_change,
-                on_close_tab,
-                on_reorder,
-                &modality,
-                tab_nodes,
-                owned_tabs_field,
-                disallow_empty_selection,
-                indicator_revision,
-            );
-        }
-    };
-
-    let is_draggable = move || reorderable.get().to_string();
-
-    let on_dragstart = {
-        let key = key.clone();
-        move |_event: web_sys::DragEvent| {
-            if config.with_value(|cfg| cfg.reorderable) {
-                drag_source.set(Some(key.clone()));
-            }
-        }
-    };
-
-    let on_dragend = move |_event: web_sys::DragEvent| {
-        drag_source.set(None);
-    };
-
-    let on_dragover = {
-        let key = key.clone();
-        move |event: web_sys::DragEvent| {
-            if can_accept_drag(config, drag_source, &key) {
-                event.prevent_default();
-            }
-        }
-    };
-
-    let on_drop = {
-        let key = key.clone();
-        move |event: web_sys::DragEvent| {
-            handle_tab_drop(
-                &event,
-                &key,
-                machine,
-                send,
-                config,
-                drag_source,
-                reorder_status,
-                tab_nodes,
-                on_reorder,
-                owned_tabs_field,
-                indicator_revision,
-            );
-        }
-    };
-
-    // Reactive close-button rendering: subscribes to the row's
-    // `closable` flag via the consumer's reactive store. When the
-    // store mutates (e.g. `tabs[i].closable = true`), Leptos re-runs
-    // this closure and renders/unrenders the close button without
-    // remounting the parent row's DOM node.
-    let close_button = {
-        let key = key.clone();
-        let fallback = tab.clone();
-
-        move || {
-            let is_closable = config.with_value(|cfg| {
-                cfg.messages_revision.get();
-
-                cfg.tabs_meta
-                    .get()
-                    .iter()
-                    .any(|meta| meta.key == key && meta.closable && !meta.disabled)
-            });
-
-            if !is_closable {
-                return None;
-            }
-
-            let fallback = fallback.clone();
-            let close_attrs =
-                attr_map_to_leptos_inline_attrs(machine.with_api_snapshot(move |api| {
-                    let label_text = current_tab_by_key(tabs_field, typed_key, &fallback)
-                        .label_text
-                        .resolve();
-
-                    let mut attrs = api.close_trigger_attrs(&label_text);
-
-                    attrs.set(HtmlAttr::TabIndex, "-1");
-
-                    attrs
-                }));
-
-            Some(view! {
-                <button
-                    {..close_attrs}
-                    on:click={
-                        let key = key.clone();
-                        move |event: web_sys::MouseEvent| {
-                            event.prevent_default();
-                            event.stop_propagation();
-                            let successor = selected_close_successor(machine, &key);
-                            emit_close_request(
-                                machine,
-                                send,
-                                on_close_tab,
-                                on_value_change,
-                                typed_key,
-                                &key,
-                                successor.as_ref().map(|(successor_key, _)| successor_key.clone()),
-                                config,
-                                owned_tabs_field,
-                                disallow_empty_selection,
-                            );
-                            if let Some((successor_key, element_id)) = successor {
-                                defer_focus_tab_node_or_id(tab_nodes, successor_key, element_id);
-                            }
-                        }
-                    }
-                ></button>
-            })
-        }
-    };
-
-    if let Some(href) = link {
-        let fallback_label = tab.clone();
-        Either::Left(view! {
-            <>
-                <a
-                    {..tab_attrs}
-                    node_ref=tab_anchor_node_ref(tab_nodes, key.clone())
-                    href=href.as_str().to_string()
-                    aria-roledescription=move || reorderable.get().then_some("draggable tab")
-                    on:click=on_click
-                    on:focus=on_focus
-                    on:blur=on_blur
-                    on:keydown=on_keydown
-                    on:pointerdown=on_pointerdown
-                    on:dragstart=on_dragstart
-                    on:dragover=on_dragover
-                    on:drop=on_drop
-                    on:dragend=on_dragend
-                    draggable=is_draggable
-                >
-                    {move || current_tab_by_key(tabs_field, typed_key, &fallback_label).label.run()}
-                </a>
-                {close_button}
-            </>
-        })
-    } else {
-        let fallback_label = tab.clone();
-        Either::Right(view! {
-            <div
-                {..tab_attrs}
-                node_ref=tab_div_node_ref(tab_nodes, key.clone())
-                aria-roledescription=move || reorderable.get().then_some("draggable tab")
-                on:click=on_click
-                on:focus=on_focus
-                on:blur=on_blur
-                on:keydown=on_keydown
-                on:pointerdown=on_pointerdown
-                on:dragstart=on_dragstart
-                on:dragover=on_dragover
-                on:drop=on_drop
-                on:dragend=on_dragend
-                draggable=is_draggable
-            >
-                {move || current_tab_by_key(tabs_field, typed_key, &fallback_label).label.run()}
-                {close_button}
-            </div>
-        })
-    }
-}
 
 fn current_tab_by_key<K: TabKey>(
     tabs_field: Field<Vec<Tab<K>>>,
@@ -1411,6 +1859,205 @@ fn register_div_tab_node(node_ref: NodeRef<html::Div>, tab_nodes: TabNodeRegistr
     all(not(feature = "ssr"), not(target_arch = "wasm32"))
 ))]
 fn register_div_tab_node(_node_ref: NodeRef<html::Div>, _tab_nodes: TabNodeRegistry, _key: Key) {}
+
+#[cfg(all(not(feature = "ssr"), target_arch = "wasm32"))]
+fn set_tab_shell_drag_image(event: &web_sys::DragEvent) {
+    let Some(target) = event.target().or_else(|| event.current_target()) else {
+        return;
+    };
+
+    let Ok(target) = target.dyn_into::<web_sys::Element>() else {
+        return;
+    };
+
+    let shell = target
+        .closest(r#"[data-ars-part="tab-shell"]"#)
+        .ok()
+        .flatten()
+        .or_else(|| target.parent_element());
+
+    let Some(shell) = shell else {
+        return;
+    };
+
+    blur_drag_source(&shell);
+    scrub_focus_visible_attrs(&shell);
+
+    let rect = shell.get_bounding_client_rect();
+
+    let Some(preview) = append_tab_drag_preview(&shell) else {
+        return;
+    };
+
+    let x = (rect.width() / 2.0).round() as i32;
+    let y = (rect.height() / 2.0).round() as i32;
+
+    set_drag_image_by_reflection(event, &preview, x, y);
+
+    remove_tab_drag_preview_soon(preview);
+}
+
+#[cfg(any(feature = "ssr", not(target_arch = "wasm32")))]
+const fn set_tab_shell_drag_image(_event: &web_sys::DragEvent) {}
+
+#[cfg(all(not(feature = "ssr"), target_arch = "wasm32"))]
+fn append_tab_drag_preview(shell: &web_sys::Element) -> Option<web_sys::Element> {
+    let preview = shell
+        .clone_node_with_deep(true)
+        .ok()?
+        .dyn_into::<web_sys::Element>()
+        .ok()?;
+
+    preview.set_attribute("data-ars-drag-image", "tab").ok()?;
+    preview.set_attribute("aria-hidden", "true").ok()?;
+    scrub_focus_visible_attrs(&preview);
+    preview
+        .set_attribute(
+            "style",
+            "position: fixed; left: 0; top: 0; transform: translate(-10000px, -10000px); \
+             pointer-events: none; z-index: -1;",
+        )
+        .ok()?;
+
+    web_sys::window()?
+        .document()?
+        .body()?
+        .append_child(&preview)
+        .ok()?;
+
+    Some(preview)
+}
+
+#[cfg(all(not(feature = "ssr"), target_arch = "wasm32"))]
+fn scrub_focus_visible_attrs(element: &web_sys::Element) {
+    element.remove_attribute("data-ars-focus-visible").ok();
+
+    let Ok(nodes) = element.query_selector_all("[data-ars-focus-visible]") else {
+        return;
+    };
+
+    for index in 0..nodes.length() {
+        let Some(node) = nodes.item(index) else {
+            continue;
+        };
+
+        if let Ok(element) = node.dyn_into::<web_sys::Element>() {
+            element.remove_attribute("data-ars-focus-visible").ok();
+        }
+    }
+}
+
+#[cfg(all(not(feature = "ssr"), target_arch = "wasm32"))]
+fn set_tab_shell_dragging(event: &web_sys::DragEvent) {
+    let Some(shell) = tab_shell_from_drag_event(event) else {
+        return;
+    };
+
+    shell.set_attribute("data-ars-dragging", "true").ok();
+}
+
+#[cfg(any(feature = "ssr", not(target_arch = "wasm32")))]
+const fn set_tab_shell_dragging(_event: &web_sys::DragEvent) {}
+
+#[cfg(all(not(feature = "ssr"), target_arch = "wasm32"))]
+fn clear_tab_shell_dragging(event: &web_sys::DragEvent) {
+    let Some(shell) = tab_shell_from_drag_event(event) else {
+        return;
+    };
+
+    shell.remove_attribute("data-ars-dragging").ok();
+}
+
+#[cfg(any(feature = "ssr", not(target_arch = "wasm32")))]
+const fn clear_tab_shell_dragging(_event: &web_sys::DragEvent) {}
+
+#[cfg(all(not(feature = "ssr"), target_arch = "wasm32"))]
+fn tab_shell_from_drag_event(event: &web_sys::DragEvent) -> Option<web_sys::Element> {
+    let target = event.target().or_else(|| event.current_target())?;
+    let target = target.dyn_into::<web_sys::Element>().ok()?;
+
+    target
+        .closest(r#"[data-ars-part="tab-shell"]"#)
+        .ok()
+        .flatten()
+        .or_else(|| target.parent_element())
+}
+
+#[cfg(all(not(feature = "ssr"), target_arch = "wasm32"))]
+fn blur_drag_source(shell: &web_sys::Element) {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+
+    let Some(active_element) = document.active_element() else {
+        return;
+    };
+
+    if !shell.contains(Some(active_element.as_ref())) {
+        return;
+    }
+
+    if let Some(html_element) = active_element.dyn_ref::<web_sys::HtmlElement>() {
+        html_element.blur().ok();
+    }
+}
+
+#[cfg(all(not(feature = "ssr"), target_arch = "wasm32"))]
+fn set_drag_image_by_reflection(
+    event: &web_sys::DragEvent,
+    preview: &web_sys::Element,
+    x: i32,
+    y: i32,
+) {
+    let Ok(data_transfer) = js_sys::Reflect::get(
+        event.as_ref(),
+        &wasm_bindgen::JsValue::from_str("dataTransfer"),
+    ) else {
+        return;
+    };
+
+    if data_transfer.is_null() || data_transfer.is_undefined() {
+        return;
+    }
+
+    let Ok(set_drag_image) = js_sys::Reflect::get(
+        &data_transfer,
+        &wasm_bindgen::JsValue::from_str("setDragImage"),
+    ) else {
+        return;
+    };
+
+    let Some(set_drag_image) = set_drag_image.dyn_ref::<js_sys::Function>() else {
+        return;
+    };
+
+    drop(set_drag_image.call3(
+        &data_transfer,
+        preview.as_ref(),
+        &wasm_bindgen::JsValue::from_f64(f64::from(x)),
+        &wasm_bindgen::JsValue::from_f64(f64::from(y)),
+    ));
+}
+
+#[cfg(all(not(feature = "ssr"), target_arch = "wasm32"))]
+fn remove_tab_drag_preview_soon(preview: web_sys::Element) {
+    let Some(window) = web_sys::window() else {
+        preview.remove();
+
+        return;
+    };
+
+    let cleanup = wasm_bindgen::closure::Closure::once_into_js(move || {
+        preview.remove();
+    });
+
+    drop(
+        window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            cleanup.as_ref().unchecked_ref(),
+            0,
+        ),
+    );
+}
 
 fn can_accept_drag<K: TabKey>(
     config: StoredValue<TabsConfig<K>>,
@@ -1500,6 +2147,7 @@ fn handle_tab_drop<K: TabKey>(
     });
 
     reorder_status.set(announcement);
+
     bump_revision(indicator_revision);
 }
 
@@ -1525,6 +2173,7 @@ fn handle_tab_keydown<K: TabKey>(
     indicator_revision: RwSignal<u64>,
 ) {
     let data = keyboard_event_data(event);
+
     modality.on_key_down(
         data.key,
         KeyModifiers {
@@ -1605,6 +2254,7 @@ fn handle_tab_keydown<K: TabKey>(
                     }
 
                     reorder_status.set(announcement);
+
                     bump_revision(indicator_revision);
                 }
             }
@@ -1717,74 +2367,6 @@ fn selected_close_successor(
             tab_id_from_api(api, &successor_key).map(|id| (successor_key, id))
         })
     })
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Tab panel rendering
-// ────────────────────────────────────────────────────────────────────
-
-fn render_tab_panel<K: TabKey>(
-    tab: Tab<K>,
-    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    lazy_mount: Signal<bool>,
-    unmount_on_exit: Signal<bool>,
-    ever_selected: RwSignal<BTreeSet<Key>>,
-    tabs_field: Field<Vec<Tab<K>>>,
-) -> impl IntoView + use<K> {
-    let typed_key = tab.key;
-    let key_for_attrs = tab.key.into_key();
-    let key_for_panel = tab.key.into_key();
-
-    let panel_attrs =
-        attr_map_to_leptos_inline_attrs(reactive_panel_attrs(machine, &key_for_attrs));
-
-    let is_selected_memo = {
-        let key = key_for_panel.clone();
-
-        machine.derive(move |api| api.is_tab_selected(&key))
-    };
-
-    let fallback_panel = tab;
-
-    let panel_body = move || {
-        let is_selected = is_selected_memo.get();
-
-        let already_selected = ever_selected.with(|set| set.contains(&key_for_panel));
-
-        let should_render = should_render_panel_body(
-            is_selected,
-            already_selected,
-            lazy_mount.get(),
-            unmount_on_exit.get(),
-        );
-
-        if should_render {
-            Some(
-                current_tab_by_key(tabs_field, typed_key, &fallback_panel)
-                    .panel
-                    .run(),
-            )
-        } else {
-            None
-        }
-    };
-
-    view! { <div {..panel_attrs}>{panel_body}</div> }
-}
-
-const fn should_render_panel_body(
-    is_selected: bool,
-    already_selected: bool,
-    lazy_mount: bool,
-    unmount_on_exit: bool,
-) -> bool {
-    if unmount_on_exit {
-        is_selected
-    } else if lazy_mount {
-        is_selected || already_selected
-    } else {
-        true
-    }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -2245,6 +2827,48 @@ fn parse_direction_token(token: &str) -> Direction {
     }
 }
 
+/// Builds a reactive `AttrMap` for the outer tab shell.
+///
+/// The agnostic API mirrors row-level selected, disabled, closable, and
+/// focus-visible state onto the shell so Tailwind templates can style the
+/// whole row, including the close affordance, through direct classes instead
+/// of `:has(...)` selectors.
+fn reactive_tab_shell_attrs(
+    machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    key: Key,
+    modality: Arc<dyn ModalityContext>,
+    modality_revision: RwSignal<u64>,
+) -> AttrMap {
+    let memo = machine.derive({
+        move |api| {
+            modality_revision.track();
+            let is_keyboard = !modality.had_pointer_interaction();
+            api.tab_shell_attrs(&key, is_keyboard)
+        }
+    });
+
+    let mut attrs = memo.get_untracked();
+
+    for &dynamic_key in &[
+        HtmlAttr::Data("ars-selected"),
+        HtmlAttr::Data("ars-disabled"),
+        HtmlAttr::Data("ars-closable"),
+        HtmlAttr::Data("ars-focus-visible"),
+    ] {
+        attrs.set(
+            dynamic_key,
+            AttrValue::reactive_optional(move || {
+                memo.with(|live| {
+                    live.get_value(&dynamic_key)
+                        .and_then(AttrValue::materialize_string)
+                })
+            }),
+        );
+    }
+
+    attrs
+}
+
 /// Builds a reactive `AttrMap` for a tab trigger.
 ///
 /// The base attributes come from `Api::tab_attrs` at first render; the
@@ -2260,15 +2884,13 @@ fn parse_direction_token(token: &str) -> Direction {
 /// internally guards on `tab_key == ctx.focused_tab`, so non-focused
 /// tabs never render `data-ars-focus-visible` even when modality is
 /// "keyboard."
-fn reactive_tab_attrs<K: TabKey>(
+fn reactive_tab_attrs(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    key: &Key,
+    key: Arc<Key>,
     modality: Arc<dyn ModalityContext>,
     modality_revision: RwSignal<u64>,
-    config: StoredValue<TabsConfig<K>>,
 ) -> AttrMap {
     let memo = machine.derive({
-        let key = key.clone();
         move |api| {
             modality_revision.track();
             let is_keyboard = !modality.had_pointer_interaction();
@@ -2277,12 +2899,6 @@ fn reactive_tab_attrs<K: TabKey>(
     });
 
     let mut attrs = memo.get_untracked();
-
-    // `reorderable` is an adapter-live signal, so the rendered
-    // roledescription is attached directly in `render_tab_button`.
-    // Avoid also spreading the core snapshot value here, which would
-    // produce duplicate static/dynamic attributes.
-    attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), AttrValue::None);
 
     // Reactive string attributes (always present, value changes).
     for &dynamic_key in &[HtmlAttr::Aria(AriaAttr::Selected), HtmlAttr::TabIndex] {
@@ -2297,6 +2913,16 @@ fn reactive_tab_attrs<K: TabKey>(
             }),
         );
     }
+
+    attrs.set(
+        HtmlAttr::Aria(AriaAttr::RoleDescription),
+        AttrValue::reactive_optional(move || {
+            memo.with(|live| {
+                live.get_value(&HtmlAttr::Aria(AriaAttr::RoleDescription))
+                    .and_then(AttrValue::materialize_string)
+            })
+        }),
+    );
 
     // Reactive boolean attributes (presence-based — pre-add even if absent
     // from the snapshot so the resulting Leptos attribute updates when
@@ -2319,25 +2945,27 @@ fn reactive_tab_attrs<K: TabKey>(
         );
     }
 
-    for &dynamic_key in &[
+    attrs.set(
         HtmlAttr::Data("ars-disabled"),
-        HtmlAttr::Aria(AriaAttr::Disabled),
-    ] {
-        attrs.set(
-            dynamic_key,
-            AttrValue::reactive_bool({
-                let key = key.clone();
-                move || {
-                    config.with_value(|cfg| {
-                        cfg.tabs_meta
-                            .get()
-                            .iter()
-                            .any(|meta| meta.key == key && meta.disabled)
-                    })
+        AttrValue::reactive_bool(move || {
+            memo.with(|live| {
+                if let Some(AttrValue::Bool(b)) = live.get_value(&HtmlAttr::Data("ars-disabled")) {
+                    *b
+                } else {
+                    false
                 }
-            }),
-        );
-    }
+            })
+        }),
+    );
+    attrs.set(
+        HtmlAttr::Aria(AriaAttr::Disabled),
+        AttrValue::reactive_optional(move || {
+            memo.with(|live| {
+                live.get_value(&HtmlAttr::Aria(AriaAttr::Disabled))
+                    .and_then(AttrValue::materialize_string)
+            })
+        }),
+    );
 
     attrs
 }
@@ -2348,12 +2976,9 @@ fn reactive_tab_attrs<K: TabKey>(
 /// is not selected) and `data-ars-selected` (presence-only).
 fn reactive_panel_attrs(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    key: &Key,
+    key: Key,
 ) -> AttrMap {
-    let memo = machine.derive({
-        let key = key.clone();
-        move |api| api.panel_attrs(&key, None)
-    });
+    let memo = machine.derive(move |api| api.panel_attrs(&key, None));
 
     let mut attrs = memo.get_untracked();
 
@@ -2606,7 +3231,7 @@ mod tests {
                 "first",
                 Some(Signal::derive(move || selected.get())),
                 field,
-                &options,
+                options,
             );
 
             let props = props_signal.get_untracked();
@@ -2658,16 +3283,6 @@ mod tests {
                 BTreeSet::from([key("second"), key("third")])
             );
         });
-    }
-
-    #[test]
-    fn should_render_panel_body_mounts_newly_selected_lazy_panel_immediately() {
-        assert!(should_render_panel_body(true, false, true, false));
-        assert!(should_render_panel_body(false, true, true, false));
-        assert!(!should_render_panel_body(false, false, true, false));
-        assert!(should_render_panel_body(true, false, true, true));
-        assert!(!should_render_panel_body(false, true, true, true));
-        assert!(should_render_panel_body(false, false, false, false));
     }
 
     #[test]

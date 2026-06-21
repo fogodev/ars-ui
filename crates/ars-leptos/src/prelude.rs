@@ -99,7 +99,7 @@ pub use crate::{
     input::{self, checkbox},
     navigation::{
         self,
-        tabs::{self, Tabs},
+        tabs::{self, Tab},
     },
     utility::{
         self,

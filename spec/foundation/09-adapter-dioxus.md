@@ -1209,7 +1209,7 @@ pub fn Checkbox(props: CheckboxProps) -> Element {
     // on `on_checked_change` being `Some`.
     let mut prev_state: Signal<Option<checkbox::State>> = use_signal(|| None);
     use_effect(move || {
-        let current = state.read().clone();
+        let current = state.cloned();
         let prev = prev_state.peek().clone();
         if prev.as_ref() != Some(&current) {
             if prev.is_some() {
@@ -2253,7 +2253,7 @@ pub fn use_safe_event_listeners(
             .ok();
         }
 
-        let Some(el) = target.read().clone() else { return };
+        let Some(el) = target.cloned() else { return };
 
         // Phase 2: Register new listeners with scope and per-registration guards.
         let mut registrations = Vec::with_capacity(listeners_effect.len());
@@ -2817,7 +2817,7 @@ where
     let locale = use_locale();
 
     use_memo(move || {
-        let resolved_locale = explicit_locale.clone().unwrap_or_else(|| locale.read().clone());
+        let resolved_locale = explicit_locale.clone().unwrap_or_else(|| locale.cloned());
         number::Formatter::new(&resolved_locale, options())
     })
 }
@@ -2859,7 +2859,7 @@ fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
             // Read the reactive locale signal to get a plain Locale value.
             // use_locale() returns Signal<Locale>; .read() subscribes the
             // component to locale changes, ensuring re-render on locale change.
-            use_locale().read().clone()
+            use_locale().cloned()
         })
 }
 

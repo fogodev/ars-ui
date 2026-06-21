@@ -6,5 +6,12 @@
 //! [`ars_dioxus`] directly today; the future `ars-ui` CLI will copy these
 //! templates into user projects for shadcn-style customization.
 
+#![allow(
+    missing_debug_implementations,
+    reason = "These components are intended to be copied in the user's codebase, \
+    so we shouldn't do any `expect` for warnings on each component"
+)]
+
 pub mod input;
+pub mod navigation;
 pub mod prelude;

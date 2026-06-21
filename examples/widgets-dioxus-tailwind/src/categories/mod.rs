@@ -8,8 +8,8 @@ mod selection;
 mod specialized;
 mod utility;
 
-use ars_dioxus::navigation::tabs::{Tab, Tabs};
-use dioxus::prelude::*;
+use ars_dioxus::prelude::*;
+use ars_dioxus_components::navigation::tabs::tailwind::Tabs;
 
 use crate::text::CategoryTab;
 

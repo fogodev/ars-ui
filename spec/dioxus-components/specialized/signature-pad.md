@@ -151,7 +151,7 @@ Dioxus should size the canvas after mount, keep `touch-action: none` on the canv
 pub fn SignaturePad() -> Element {
     let machine = use_machine::<signature_pad::Machine>(signature_pad::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
-    rsx! { div { ..root_attrs.read().clone() } }
+    rsx! { div { ..root_attrs.cloned() } }
 }
 ```
 

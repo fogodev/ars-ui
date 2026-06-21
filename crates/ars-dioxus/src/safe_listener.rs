@@ -119,7 +119,7 @@ mod web {
         use_effect(move || {
             remove_previous_listeners(closure_handle);
 
-            let Some(element) = target.read().clone() else {
+            let Some(element) = target.cloned() else {
                 return;
             };
 

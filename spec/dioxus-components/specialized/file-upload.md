@@ -158,7 +158,7 @@ Dioxus should keep the hidden input mounted, trigger its click from documented g
 pub fn FileUpload() -> Element {
     let machine = use_machine::<file_upload::Machine>(file_upload::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
-    rsx! { div { ..root_attrs.read().clone() } }
+    rsx! { div { ..root_attrs.cloned() } }
 }
 ```
 

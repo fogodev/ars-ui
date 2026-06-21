@@ -206,14 +206,14 @@ Dioxus should keep separate refs for start and end thumbs, isolate host-specific
 let machine = use_machine::<range_slider::Machine>(props);
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        div { ..machine.derive(|api| api.track_attrs()).read().clone(),
-            div { ..machine.derive(|api| api.range_attrs()).read().clone() }
-            div { ..machine.derive(|api| api.thumb_attrs(ThumbIndex::Start)).read().clone() }
-            div { ..machine.derive(|api| api.thumb_attrs(ThumbIndex::End)).read().clone() }
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
+        div { ..machine.derive(|api| api.track_attrs()).cloned(),
+            div { ..machine.derive(|api| api.range_attrs()).cloned() }
+            div { ..machine.derive(|api| api.thumb_attrs(ThumbIndex::Start)).cloned() }
+            div { ..machine.derive(|api| api.thumb_attrs(ThumbIndex::End)).cloned() }
         }
-        input { ..machine.derive(|api| api.hidden_input_attrs(ThumbIndex::Start)).read().clone() }
-        input { ..machine.derive(|api| api.hidden_input_attrs(ThumbIndex::End)).read().clone() }
+        input { ..machine.derive(|api| api.hidden_input_attrs(ThumbIndex::Start)).cloned() }
+        input { ..machine.derive(|api| api.hidden_input_attrs(ThumbIndex::End)).cloned() }
     }
 }
 ```

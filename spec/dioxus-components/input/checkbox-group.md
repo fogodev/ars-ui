@@ -185,8 +185,8 @@ let machine = use_machine::<checkbox_group::Machine>(props);
 use_context_provider(|| Context::new(machine));
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        span { ..machine.derive(|api| api.label_attrs()).read().clone(), {children} }
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
+        span { ..machine.derive(|api| api.label_attrs()).cloned(), {children} }
     }
 }
 ```

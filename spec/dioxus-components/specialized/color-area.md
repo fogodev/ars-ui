@@ -149,7 +149,7 @@ Dioxus should measure the mounted background node through a stable mounted handl
 pub fn ColorArea() -> Element {
     let machine = use_machine::<color_area::Machine>(color_area::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
-    rsx! { div { ..root_attrs.read().clone() } }
+    rsx! { div { ..root_attrs.cloned() } }
 }
 ```
 

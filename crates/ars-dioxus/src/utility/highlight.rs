@@ -64,7 +64,7 @@ pub fn Highlight(props: HighlightProps) -> Element {
 
     let api = Api::new(core_props);
 
-    let locale = props.locale.unwrap_or_else(|| use_locale().read().clone());
+    let locale = props.locale.unwrap_or_else(|| use_locale().cloned());
 
     let component_root_attrs = attr_map_to_dioxus_inline_attrs(api.root_attrs());
 

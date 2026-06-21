@@ -491,7 +491,7 @@ pub fn FloatingPanel(props: FloatingPanelProps) -> Element {
 
     rsx! {
         div {
-            ..root_attrs.read().clone(),
+            ..root_attrs.cloned(),
             onpointerdown: move |_| {
                 last_pointer.set(true);
                 machine.send.call(floating_panel::Event::BringToFront);
@@ -523,7 +523,7 @@ pub fn DragHandle(props: DragHandleProps) -> Element {
 
     rsx! {
         div {
-            ..attrs.read().clone(),
+            ..attrs.cloned(),
             {props.children}
         }
     }
@@ -540,7 +540,7 @@ pub fn ResizeHandle(props: ResizeHandleProps) -> Element {
     // Send ResizeStart(handle), ResizeMove { dx, dy }, ResizeEnd to ctx.machine.send
 
     rsx! {
-        div { ..attrs.read().clone() }
+        div { ..attrs.cloned() }
     }
 }
 
@@ -552,7 +552,7 @@ pub fn Header(props: HeaderProps) -> Element {
 
     rsx! {
         div {
-            ..attrs.read().clone(),
+            ..attrs.cloned(),
             {props.children}
         }
     }
@@ -566,7 +566,7 @@ pub fn Title(props: TitleProps) -> Element {
 
     rsx! {
         div {
-            ..attrs.read().clone(),
+            ..attrs.cloned(),
             {props.children}
         }
     }
@@ -580,7 +580,7 @@ pub fn Content(props: ContentProps) -> Element {
 
     rsx! {
         div {
-            ..attrs.read().clone(),
+            ..attrs.cloned(),
             {props.children}
         }
     }
@@ -594,7 +594,7 @@ pub fn CloseTrigger(props: CloseTriggerProps) -> Element {
 
     rsx! {
         button {
-            ..attrs.read().clone(),
+            ..attrs.cloned(),
             onclick: move |_| {
                 ctx.machine.send.call(floating_panel::Event::Close);
             },
@@ -612,7 +612,7 @@ pub fn MinimizeTrigger(props: MinimizeTriggerProps) -> Element {
 
     rsx! {
         button {
-            ..attrs.read().clone(),
+            ..attrs.cloned(),
             onclick: move |_| {
                 if is_minimized() {
                     ctx.machine.send.call(floating_panel::Event::Restore);
@@ -634,7 +634,7 @@ pub fn MaximizeTrigger(props: MaximizeTriggerProps) -> Element {
 
     rsx! {
         button {
-            ..attrs.read().clone(),
+            ..attrs.cloned(),
             onclick: move |_| {
                 if is_maximized() {
                     ctx.machine.send.call(floating_panel::Event::Restore);
@@ -657,7 +657,7 @@ pub fn StageTrigger(props: StageTriggerProps) -> Element {
 
     rsx! {
         button {
-            ..attrs.read().clone(),
+            ..attrs.cloned(),
             onclick: move |_| {
                 ctx.machine.with_api_snapshot(|api| api.on_stage_trigger_click());
             },

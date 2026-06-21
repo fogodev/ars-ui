@@ -198,7 +198,7 @@ pub struct FocusScopeSketchProps {
 pub fn FocusScope(props: FocusScopeSketchProps) -> Element {
     let machine = use_machine::<focus_scope::Machine>(focus_scope::Props::default());
     let attrs = machine.derive(|api| api.part_attrs(focus_scope::Part::Container));
-    rsx! { div { ..attrs.read().clone(), {props.children} } }
+    rsx! { div { ..attrs.cloned(), {props.children} } }
 }
 ```
 

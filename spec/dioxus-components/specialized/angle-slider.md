@@ -155,7 +155,7 @@ Dioxus should measure the mounted track node through a stable mounted handle and
 pub fn AngleSlider() -> Element {
     let machine = use_machine::<angle_slider::Machine>(angle_slider::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
-    rsx! { div { ..root_attrs.read().clone() } }
+    rsx! { div { ..root_attrs.cloned() } }
 }
 ```
 

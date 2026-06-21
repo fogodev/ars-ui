@@ -251,7 +251,7 @@ pub fn ActionGroup(props: ActionGroupSketchProps) -> Element {
 
     rsx! {
         div {
-            ..root_attrs.read().clone(),
+            ..root_attrs.cloned(),
             {props.children}
         }
     }

@@ -452,7 +452,7 @@ pub fn Tour(props: TourProps) -> Element {
         document::Link { }  // placeholder — actual portal uses DOM manipulation
         if is_open() {
             div {
-                ..root_attrs.read().clone(),
+                ..root_attrs.cloned(),
                 style: "z-index: {z_index.value()}",
                 {props.children}
             }
@@ -469,7 +469,7 @@ pub fn Backdrop() -> Element {
 
     rsx! {
         div {
-            ..overlay_attrs.read().clone(),
+            ..overlay_attrs.cloned(),
             onclick: move |_| machine.read().send.call(tour::Event::Dismiss),
         }
     }
@@ -484,7 +484,7 @@ pub fn Spotlight() -> Element {
 
     // Target rect is computed client-side and applied as inline styles
     rsx! {
-        div { ..highlight_attrs.read().clone() }
+        div { ..highlight_attrs.cloned() }
     }
 }
 
@@ -497,7 +497,7 @@ pub fn Content(props: ContentProps) -> Element {
 
     rsx! {
         div {
-            ..content_attrs.read().clone(),
+            ..content_attrs.cloned(),
             onkeydown: move |ev| {
                 machine.read().with_api_snapshot(|api| {
                     api.on_keydown(&KeyboardEventData {
@@ -526,7 +526,7 @@ pub fn Title(props: TitleProps) -> Element {
     let machine = ctx.machine;
     let title_attrs = machine.read().derive(|api| api.step_title_attrs());
 
-    rsx! { h3 { ..title_attrs.read().clone(), {props.children} } }
+    rsx! { h3 { ..title_attrs.cloned(), {props.children} } }
 }
 
 #[component]
@@ -536,7 +536,7 @@ pub fn Description(props: DescriptionProps) -> Element {
     let machine = ctx.machine;
     let desc_attrs = machine.read().derive(|api| api.step_description_attrs());
 
-    rsx! { p { ..desc_attrs.read().clone(), {props.children} } }
+    rsx! { p { ..desc_attrs.cloned(), {props.children} } }
 }
 
 #[component]
@@ -548,7 +548,7 @@ pub fn CloseTrigger(props: CloseTriggerProps) -> Element {
 
     rsx! {
         button {
-            ..close_attrs.read().clone(),
+            ..close_attrs.cloned(),
             onclick: move |_| machine.read().send.call(tour::Event::Dismiss),
             {props.children}
         }
@@ -564,7 +564,7 @@ pub fn NextTrigger(props: NextTriggerProps) -> Element {
 
     rsx! {
         button {
-            ..next_attrs.read().clone(),
+            ..next_attrs.cloned(),
             onclick: move |_| machine.read().send.call(tour::Event::NextStep),
             {props.children}
         }
@@ -580,7 +580,7 @@ pub fn PrevTrigger(props: PrevTriggerProps) -> Element {
 
     rsx! {
         button {
-            ..prev_attrs.read().clone(),
+            ..prev_attrs.cloned(),
             onclick: move |_| machine.read().send.call(tour::Event::PrevStep),
             {props.children}
         }
@@ -596,7 +596,7 @@ pub fn SkipTrigger(props: SkipTriggerProps) -> Element {
 
     rsx! {
         button {
-            ..skip_attrs.read().clone(),
+            ..skip_attrs.cloned(),
             onclick: move |_| machine.read().send.call(tour::Event::Skip),
             {props.children}
         }
@@ -611,7 +611,7 @@ pub fn Progress(props: ProgressProps) -> Element {
     let progress_attrs = machine.read().derive(|api| api.progress_attrs());
 
     rsx! {
-        div { ..progress_attrs.read().clone(), {props.children} }
+        div { ..progress_attrs.cloned(), {props.children} }
     }
 }
 ```

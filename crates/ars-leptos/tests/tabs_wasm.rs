@@ -7,6 +7,8 @@
 #![cfg(target_arch = "wasm32")]
 
 use std::{
+    cell::RefCell,
+    rc::Rc,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU32, Ordering},
@@ -14,7 +16,7 @@ use std::{
     time::Duration,
 };
 
-use ars_collections::Key;
+use ars_collections::{Key, TabKey};
 use ars_core::{
     Direction, I18nRegistries, MessageFn, MessagesRegistry, Orientation, PlatformEffects, Rect,
     ResolvedDirection, SafeUrl, TimerHandle,
@@ -22,11 +24,12 @@ use ars_core::{
 use ars_i18n::locales;
 use ars_leptos::{
     ArsProvider,
-    navigation::tabs::{ActivationMode, Field, ReorderEvent, Tab, TabLabel, Tabs, TabsSource},
+    navigation::tabs,
     reactive_stores::{self, Store},
 };
 use leptos::{
     children::ViewFn,
+    either::EitherOf4,
     mount::mount_to,
     prelude::*,
     web_sys::{self, DragEventInit, KeyboardEventInit, MouseEventInit, PointerEventInit},
@@ -36,17 +39,119 @@ use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 wasm_bindgen_test_configure!(run_in_browser);
 
-type TestTab = Tab<&'static str>;
-type TestReorderEvent = ReorderEvent<&'static str>;
+type TestTab = tabs::Tab<&'static str>;
+type TestReorderEvent = tabs::ReorderEvent<&'static str>;
+
+#[component]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test helper mirrors the former closed adapter shape while composing public parts"
+)]
+fn Tabs<K: TabKey>(
+    #[prop(optional, into)] value: Option<Signal<Option<K>>>,
+    #[prop(into)] default_value: K,
+    #[prop(into)] tabs: tabs::TabsSource<K>,
+    #[prop(optional, into, default = Signal::from(Orientation::Horizontal))] orientation: Signal<
+        Orientation,
+    >,
+    #[prop(optional, into, default = Signal::from(tabs::ActivationMode::Automatic))]
+    activation_mode: Signal<tabs::ActivationMode>,
+    #[prop(optional, into, default = Signal::from(Direction::Ltr))] dir: Signal<Direction>,
+    #[prop(optional, into, default = Signal::from(true))] loop_focus: Signal<bool>,
+    #[prop(optional, into, default = Signal::from(false))] disallow_empty_selection: Signal<bool>,
+    #[prop(optional, into, default = Signal::from(false))] reorderable: Signal<bool>,
+    #[prop(optional, default = Callback::new(|_| ()))] on_value_change: Callback<Option<K>>,
+    #[prop(optional, default = Callback::new(|_| ()))] on_close_tab: Callback<K>,
+    #[prop(optional)] on_reorder: Option<Callback<tabs::ReorderEvent<K>, bool>>,
+) -> impl IntoView {
+    let children = || {
+        view! {
+            <tabs::List<K> />
+            <tabs::Panels<K> />
+            <tabs::LiveRegion />
+        }
+    };
+
+    match (value, on_reorder) {
+        (Some(value), Some(on_reorder)) => EitherOf4::A(view! {
+            <tabs::Root
+                value=value
+                default_value
+                tabs
+                orientation
+                activation_mode
+                dir
+                loop_focus
+                disallow_empty_selection
+                reorderable
+                on_value_change
+                on_close_tab
+                on_reorder
+            >
+                {children()}
+            </tabs::Root>
+        }),
+        (Some(value), None) => EitherOf4::B(view! {
+            <tabs::Root
+                value=value
+                default_value
+                tabs
+                orientation
+                activation_mode
+                dir
+                loop_focus
+                disallow_empty_selection
+                reorderable
+                on_value_change
+                on_close_tab
+            >
+                {children()}
+            </tabs::Root>
+        }),
+        (None, Some(on_reorder)) => EitherOf4::C(view! {
+            <tabs::Root
+                default_value
+                tabs
+                orientation
+                activation_mode
+                dir
+                loop_focus
+                disallow_empty_selection
+                reorderable
+                on_value_change
+                on_close_tab
+                on_reorder
+            >
+                {children()}
+            </tabs::Root>
+        }),
+        (None, None) => EitherOf4::D(view! {
+            <tabs::Root
+                default_value
+                tabs
+                orientation
+                activation_mode
+                dir
+                loop_focus
+                disallow_empty_selection
+                reorderable
+                on_value_change
+                on_close_tab
+            >
+                {children()}
+            </tabs::Root>
+        }),
+    }
+}
 
 #[wasm_bindgen_test]
 fn tab_public_builders_and_debug_paths_are_covered() {
-    let label = TabLabel::static_text("Standalone");
+    let label = tabs::TabLabel::static_text("Standalone");
 
     assert_eq!(label.resolve(), "Standalone");
     assert!(format!("{label:?}").contains("Standalone"));
 
-    let tab = Tab::new_static("standalone", "Standalone", || view! { "Panel" })
+    let tab = tabs::Tab::new_static("standalone", "Standalone", || view! { "Panel" })
         .trigger(|| view! { <strong>"Standalone trigger"</strong> })
         .disabled(true)
         .closable(true)
@@ -67,18 +172,22 @@ fn tab_public_builders_and_debug_paths_are_covered() {
     assert!(tab_debug.contains("standalone"));
     assert!(tab_debug.contains("Standalone"));
 
-    let from_vec = TabsSource::from(vec![Tab::new_static(
+    let from_vec = tabs::TabsSource::from(vec![tabs::Tab::new_static(
         "first",
         "First",
         || view! { "Panel" },
     )]);
 
-    assert!(matches!(from_vec, TabsSource::Owned(_)));
+    assert!(matches!(from_vec, tabs::TabsSource::Owned(_)));
     assert!(format!("{from_vec:?}").contains("TabsSource::Owned"));
 
-    let from_array = TabsSource::from([Tab::new_static("second", "Second", || view! { "Panel" })]);
+    let from_array = tabs::TabsSource::from([tabs::Tab::new_static(
+        "second",
+        "Second",
+        || view! { "Panel" },
+    )]);
 
-    assert!(matches!(from_array, TabsSource::Owned(_)));
+    assert!(matches!(from_array, tabs::TabsSource::Owned(_)));
 }
 
 #[derive(Store)]
@@ -340,7 +449,7 @@ impl PlatformEffects for MeasurementProbePlatform {
     }
 }
 
-fn store_field(tabs: Vec<TestTab>) -> Field<Vec<TestTab>> {
+fn store_field(tabs: Vec<TestTab>) -> tabs::Field<Vec<TestTab>> {
     Store::new(TabsTestState { tabs }).tabs().into()
 }
 
@@ -422,19 +531,19 @@ async fn deferred_focus_turn() {
 
 fn three_tabs() -> Vec<TestTab> {
     vec![
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "first",
             "First",
             ViewFn::from(|| view! { "First" }),
             ViewFn::from(|| view! { <p>"Panel one"</p> }),
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "second",
             "Second",
             ViewFn::from(|| view! { "Second" }),
             ViewFn::from(|| view! { <p>"Panel two"</p> }),
         ),
-        Tab::new_with_label(
+        tabs::Tab::new_with_label(
             "third",
             "Third",
             ViewFn::from(|| view! { "Third" }),
@@ -461,11 +570,8 @@ fn dispatch_keydown_with_options(
     let init = KeyboardEventInit::new();
 
     init.set_key(key);
-
     init.set_bubbles(true);
-
     init.set_cancelable(true);
-
     init.set_ctrl_key(ctrl);
     init.set_repeat(repeat);
     init.set_is_composing(is_composing);
@@ -512,7 +618,6 @@ fn cancelable_click(target: &web_sys::HtmlElement) -> web_sys::MouseEvent {
     let init = MouseEventInit::new();
 
     init.set_bubbles(true);
-
     init.set_cancelable(true);
 
     let event = web_sys::MouseEvent::new_with_mouse_event_init_dict("click", &init)
@@ -539,6 +644,124 @@ fn dispatch_drag_event(target: &web_sys::HtmlElement, kind: &str) -> web_sys::Dr
         .expect("drag event should dispatch");
 
     event
+}
+
+fn dispatch_drag_event_with_data_transfer(
+    target: &web_sys::HtmlElement,
+    kind: &str,
+) -> web_sys::DragEvent {
+    let init = DragEventInit::new();
+    let data_transfer = web_sys::DataTransfer::new().expect("data transfer should construct");
+
+    init.set_bubbles(true);
+    init.set_cancelable(true);
+    init.set_data_transfer(Some(&data_transfer));
+
+    let event = web_sys::DragEvent::new_with_event_init_dict(kind, &init)
+        .expect("drag event should construct");
+
+    target
+        .dispatch_event(&event)
+        .expect("drag event should dispatch");
+
+    event
+}
+
+struct DragImageCall {
+    part: Option<String>,
+    preview: Option<String>,
+    has_close_trigger: bool,
+    has_focus_visible: bool,
+    has_selected_state: bool,
+    connected: bool,
+    x: i32,
+    y: i32,
+}
+
+struct DragImageSpy {
+    calls: Rc<RefCell<Vec<DragImageCall>>>,
+    prototype: wasm_bindgen::JsValue,
+    original: wasm_bindgen::JsValue,
+    _closure: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Element, i32, i32)>,
+}
+
+impl Drop for DragImageSpy {
+    fn drop(&mut self) {
+        drop(js_sys::Reflect::set(
+            &self.prototype,
+            &wasm_bindgen::JsValue::from_str("setDragImage"),
+            &self.original,
+        ));
+    }
+}
+
+fn install_drag_image_spy() -> DragImageSpy {
+    let constructor = js_sys::Reflect::get(
+        &js_sys::global(),
+        &wasm_bindgen::JsValue::from_str("DataTransfer"),
+    )
+    .expect("DataTransfer constructor should be available");
+    let prototype =
+        js_sys::Reflect::get(&constructor, &wasm_bindgen::JsValue::from_str("prototype"))
+            .expect("DataTransfer prototype should be available");
+    let original =
+        js_sys::Reflect::get(&prototype, &wasm_bindgen::JsValue::from_str("setDragImage"))
+            .expect("setDragImage should be available");
+    let calls = Rc::new(RefCell::new(Vec::<DragImageCall>::new()));
+    let closure_calls = Rc::clone(&calls);
+    let closure = wasm_bindgen::closure::Closure::wrap(Box::new(
+        move |image: web_sys::Element, x: i32, y: i32| {
+            let part = image.get_attribute("data-ars-part");
+
+            let preview = image.get_attribute("data-ars-drag-image");
+
+            let has_close_trigger = image
+                .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
+                .expect("query should succeed")
+                .is_some();
+
+            let has_focus_visible = image.has_attribute("data-ars-focus-visible")
+                || image
+                    .query_selector("[data-ars-focus-visible]")
+                    .expect("query should succeed")
+                    .is_some();
+
+            let has_selected_state = image.has_attribute("data-ars-selected")
+                || image.has_attribute("aria-selected")
+                || image
+                    .query_selector("[data-ars-selected], [aria-selected]")
+                    .expect("query should succeed")
+                    .is_some();
+
+            let connected = image.is_connected();
+
+            closure_calls.borrow_mut().push(DragImageCall {
+                part,
+                preview,
+                has_close_trigger,
+                has_focus_visible,
+                has_selected_state,
+                connected,
+                x,
+                y,
+            });
+        },
+    )
+        as Box<dyn FnMut(web_sys::Element, i32, i32)>);
+
+    js_sys::Reflect::set(
+        &prototype,
+        &wasm_bindgen::JsValue::from_str("setDragImage"),
+        closure.as_ref(),
+    )
+    .expect("setDragImage spy should install");
+
+    DragImageSpy {
+        calls,
+        prototype,
+        original,
+        _closure: closure,
+    }
 }
 
 fn first_with_data_part(parent: &web_sys::HtmlElement, part: &str) -> web_sys::HtmlElement {
@@ -582,6 +805,15 @@ fn tab_at(parent: &web_sys::HtmlElement, index: u32) -> web_sys::HtmlElement {
         .expect("tab is HtmlElement")
 }
 
+fn tab_shell_at(parent: &web_sys::HtmlElement, index: u32) -> web_sys::HtmlElement {
+    tab_at(parent, index)
+        .closest(r#"[data-ars-part="tab-shell"]"#)
+        .expect("query should succeed")
+        .unwrap_or_else(|| panic!("tab shell at index {index} should exist"))
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("tab shell is HtmlElement")
+}
+
 fn active_element_text() -> String {
     document()
         .active_element()
@@ -604,14 +836,14 @@ async fn link_click_prevents_default_and_emits_value_change() {
         let parent = container();
 
         let link_tabs = vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "home",
                 "Home",
                 ViewFn::from(|| view! { "Home" }),
                 ViewFn::from(|| view! { <p>"Home panel"</p> }),
             )
             .link(SafeUrl::from_static("/home")),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "settings",
                 "Settings",
                 ViewFn::from(|| view! { "Settings" }),
@@ -682,7 +914,7 @@ async fn linked_close_trigger_click_prevents_default_navigation() {
         let parent = container();
 
         let link_tabs = vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "home",
                 "Home",
                 ViewFn::from(|| view! { "Home" }),
@@ -690,7 +922,7 @@ async fn linked_close_trigger_click_prevents_default_navigation() {
             )
             .link(SafeUrl::from_static("/home"))
             .closable(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "settings",
                 "Settings",
                 ViewFn::from(|| view! { "Settings" }),
@@ -768,14 +1000,14 @@ async fn manual_link_tabs_activate_from_keyboard_without_browser_navigation() {
         let parent = container();
 
         let link_tabs = vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "home",
                 "Home",
                 ViewFn::from(|| view! { "Home" }),
                 ViewFn::from(|| view! { <p>"Home panel"</p> }),
             )
             .link(SafeUrl::from_static("/home")),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "settings",
                 "Settings",
                 ViewFn::from(|| view! { "Settings" }),
@@ -790,7 +1022,7 @@ async fn manual_link_tabs_activate_from_keyboard_without_browser_navigation() {
                     <Tabs
                         default_value="settings"
                         tabs=store_field(link_tabs)
-                        activation_mode=ActivationMode::Manual
+                        activation_mode=tabs::ActivationMode::Manual
                         on_value_change=Callback::new({
                             let selected = Arc::clone(&selected);
                             move |key| {
@@ -848,6 +1080,7 @@ async fn controlled_click_emits_value_change_without_mutating_controlled_selecti
         let parent = container();
 
         let (value, _set_value) = signal::<Option<&'static str>>(Some("first"));
+
         let value_signal: Signal<Option<&'static str>> = value.into();
 
         let mount_handle = mount_to(parent.clone(), {
@@ -918,6 +1151,7 @@ async fn controlled_arrow_emits_value_change_without_mutating_controlled_selecti
         let parent = container();
 
         let (value, _set_value) = signal::<Option<&'static str>>(Some("first"));
+
         let value_signal: Signal<Option<&'static str>> = value.into();
 
         let mount_handle = mount_to(parent.clone(), {
@@ -1066,7 +1300,7 @@ async fn keyboard_close_of_focused_unselected_tab_preserves_manual_selection() {
                 <Tabs
                     default_value="first"
                     tabs=store.tabs()
-                    activation_mode=ActivationMode::Manual
+                    activation_mode=tabs::ActivationMode::Manual
                     on_close_tab=Callback::new(move |key: &'static str| {
                         tabs_for_close.write().retain(|tab| tab.key != key);
                     })
@@ -1114,7 +1348,7 @@ async fn close_request_respects_disallow_empty_selection_for_external_store() {
     let (mount_handle, parent) = owner.with(|| {
         let parent = container();
         let store = store_handle(vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "only",
                 "Only",
                 ViewFn::from(|| view! { "Only" }),
@@ -1196,7 +1430,7 @@ async fn close_request_reads_disallow_empty_selection_at_close_time_for_owned_ta
                 <Tabs
                     default_value="only"
                     tabs=[
-                        Tab::new_with_label(
+                        tabs::Tab::new_with_label(
                                 "only",
                                 "Only",
                                 ViewFn::from(|| view! { "Only" }),
@@ -1270,20 +1504,20 @@ async fn inline_array_close_trigger_removes_owned_tab() {
                 <Tabs
                     default_value="second"
                     tabs=[
-                        Tab::new_with_label(
+                        tabs::Tab::new_with_label(
                             "first",
                             "First",
                             ViewFn::from(|| view! { "First" }),
                             ViewFn::from(|| view! { <p>"Panel one"</p> }),
                         ),
-                        Tab::new_with_label(
+                        tabs::Tab::new_with_label(
                                 "second",
                                 "Second",
                                 ViewFn::from(|| view! { "Second" }),
                                 ViewFn::from(|| view! { <p>"Panel two"</p> }),
                             )
                             .closable(true),
-                        Tab::new_with_label(
+                        tabs::Tab::new_with_label(
                             "third",
                             "Third",
                             ViewFn::from(|| view! { "Third" }),
@@ -1417,14 +1651,14 @@ async fn close_and_reorder_callbacks_fire_from_user_events() {
         let parent = container();
 
         let tabs = vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 ViewFn::from(|| view! { "First" }),
                 ViewFn::from(|| view! { <p>"Panel one"</p> }),
             )
             .closable(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 ViewFn::from(|| view! { "Second" }),
@@ -1514,6 +1748,113 @@ async fn close_and_reorder_callbacks_fire_from_user_events() {
         "recognized reorder shortcuts should be canceled even when vetoed"
     );
 
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn dragstart_uses_tab_shell_as_drag_preview() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent) = owner.with(|| {
+        let parent = container();
+        let tabs = vec![
+            tabs::Tab::new_with_label(
+                "first",
+                "First",
+                ViewFn::from(|| view! { "First" }),
+                ViewFn::from(|| view! { <p>"Panel one"</p> }),
+            )
+            .closable(true),
+            tabs::Tab::new_with_label(
+                "second",
+                "Second",
+                ViewFn::from(|| view! { "Second" }),
+                ViewFn::from(|| view! { <p>"Panel two"</p> }),
+            ),
+        ];
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Tabs
+                    default_value="first"
+                    tabs=store_field(tabs)
+                    reorderable=true
+                    on_reorder=Callback::new(|_| true)
+                />
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let spy = install_drag_image_spy();
+    let first = tab_at(&parent, 0);
+    first
+        .set_attribute("data-ars-focus-visible", "")
+        .expect("test setup should mark the source tab focus-visible");
+
+    let shell = first
+        .closest(r#"[data-ars-part="tab-shell"]"#)
+        .expect("query should succeed")
+        .expect("tab should live inside a shell");
+
+    dispatch_drag_event_with_data_transfer(&first, "dragstart");
+
+    let calls = spy.calls.borrow();
+
+    assert!(
+        shell.has_attribute("data-ars-dragging"),
+        "live tab shell should expose dragging state during native drag"
+    );
+    assert_eq!(calls.len(), 1, "dragstart should set a custom drag image");
+    assert_eq!(
+        calls[0].part.as_deref(),
+        Some("tab-shell"),
+        "drag preview should use the shell that contains the visual tab"
+    );
+    assert_eq!(
+        calls[0].preview.as_deref(),
+        Some("tab"),
+        "drag preview should be an isolated clone, not the live shell"
+    );
+    assert!(
+        calls[0].has_close_trigger,
+        "drag preview should include the close trigger beside the tab"
+    );
+    assert!(
+        !first.has_attribute("data-ars-focus-visible"),
+        "dragstart should blur the live focused tab so the native drag source does not paint a focus ring"
+    );
+    assert!(
+        first.has_attribute("data-ars-selected"),
+        "drag preview cleanup should not mutate the live selected tab"
+    );
+    assert!(
+        !calls[0].has_focus_visible,
+        "drag preview should not copy keyboard focus-visible state"
+    );
+    assert!(
+        calls[0].has_selected_state,
+        "drag preview should keep selected styling state so the full shell visual is captured"
+    );
+    assert!(
+        calls[0].connected,
+        "drag preview clone should be connected while setDragImage captures it"
+    );
+    assert!(
+        calls[0].x > 0 && calls[0].y > 0,
+        "drag image hotspot should be inside the shell"
+    );
+
+    drop(calls);
+    dispatch_drag_event_with_data_transfer(&first, "dragend");
+    assert!(
+        !shell.has_attribute("data-ars-dragging"),
+        "live tab shell should clear dragging state after native drag"
+    );
+    drop(spy);
     drop(mount_handle);
 }
 
@@ -1657,19 +1998,19 @@ async fn inline_array_drag_and_drop_reorders_owned_tabs() {
                 <Tabs
                     default_value="first"
                     tabs=[
-                        Tab::new_with_label(
+                        tabs::Tab::new_with_label(
                             "first",
                             "First",
                             ViewFn::from(|| view! { "First" }),
                             ViewFn::from(|| view! { <p>"Panel one"</p> }),
                         ),
-                        Tab::new_with_label(
+                        tabs::Tab::new_with_label(
                             "second",
                             "Second",
                             ViewFn::from(|| view! { "Second" }),
                             ViewFn::from(|| view! { <p>"Panel two"</p> }),
                         ),
-                        Tab::new_with_label(
+                        tabs::Tab::new_with_label(
                             "third",
                             "Third",
                             ViewFn::from(|| view! { "Third" }),
@@ -1742,20 +2083,20 @@ async fn drag_and_drop_ignores_missing_same_or_disabled_targets() {
         let parent = container();
 
         let tabs = vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 ViewFn::from(|| view! { "First" }),
                 ViewFn::from(|| view! { <p>"Panel one"</p> }),
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 ViewFn::from(|| view! { "Second" }),
                 ViewFn::from(|| view! { <p>"Panel two"</p> }),
             )
             .disabled(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "third",
                 "Third",
                 ViewFn::from(|| view! { "Third" }),
@@ -2206,7 +2547,7 @@ async fn indicator_style_refreshes_after_selected_tab_label_changes() {
 
     let before = indicator.get_attribute("style").unwrap_or_default();
 
-    tabs_for_update.write()[0] = Tab::new_with_label(
+    tabs_for_update.write()[0] = tabs::Tab::new_with_label(
         "first",
         "First selected tab with longer label",
         ViewFn::from(|| view! { "First selected tab with longer label" }),
@@ -2316,13 +2657,13 @@ async fn indicator_style_refreshes_after_selected_trigger_visual_content_resizes
             });
 
             let tabs = vec![
-                Tab::new_with_label(
+                tabs::Tab::new_with_label(
                     "first",
                     "First",
                     trigger,
                     ViewFn::from(|| view! { <p>"Panel one"</p> }),
                 ),
-                Tab::new_with_label(
+                tabs::Tab::new_with_label(
                     "second",
                     "Second",
                     ViewFn::from(|| view! { "Second" }),
@@ -2400,7 +2741,7 @@ async fn arrow_keys_move_selection_in_automatic_mode() {
     let (mount_handle, parent, _store) = owner.with(|| {
         let parent = container();
         let store = store_handle(three_tabs());
-        let field: Field<Vec<TestTab>> = store.tabs().into();
+        let field: tabs::Field<Vec<TestTab>> = store.tabs().into();
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! { <Tabs default_value="first" tabs=field /> }
@@ -2589,20 +2930,20 @@ async fn automatic_hotkeys_skip_disabled_tabs_and_support_vertical_axis() {
     let (mount_handle, parent) = owner.with(|| {
         let parent = container();
         let tabs = vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 ViewFn::from(|| view! { "First" }),
                 ViewFn::from(|| view! { <p>"Panel one"</p> }),
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 ViewFn::from(|| view! { "Second" }),
                 ViewFn::from(|| view! { <p>"Panel two"</p> }),
             )
             .disabled(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "third",
                 "Third",
                 ViewFn::from(|| view! { "Third" }),
@@ -2691,7 +3032,7 @@ async fn manual_activation_accepts_enter_and_space_hotkeys() {
                 <Tabs
                     default_value="first"
                     tabs=store_field(three_tabs())
-                    activation_mode=ActivationMode::Manual
+                    activation_mode=tabs::ActivationMode::Manual
                 />
             }
         });
@@ -3244,7 +3585,7 @@ async fn manual_activation_mode_separates_focus_from_selection() {
                 <Tabs
                     default_value="first"
                     tabs=store_field(three_tabs())
-                    activation_mode=ActivationMode::Manual
+                    activation_mode=tabs::ActivationMode::Manual
                 />
             }
         });
@@ -3379,14 +3720,14 @@ async fn closable_tab_dispatches_close_on_delete_key() {
         let parent = container();
 
         let closable_tabs = vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 ViewFn::from(|| view! { "First" }),
                 ViewFn::from(|| view! { <p>"Panel one"</p> }),
             )
             .closable(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 ViewFn::from(|| view! { "Second" }),
@@ -3423,7 +3764,7 @@ async fn closable_tab_dispatches_close_on_delete_key() {
 
     let tablist = first_with_data_part(&parent, "list");
 
-    // The closable tab renders an embedded close button; verify it's not in
+    // The closable tab renders a pointer close affordance; verify it's not in
     // the roving order.
     let close_trigger = tablist
         .query_selector(r#"[data-ars-part="tab-close-trigger"]"#)
@@ -3432,10 +3773,10 @@ async fn closable_tab_dispatches_close_on_delete_key() {
         .dyn_into::<web_sys::HtmlElement>()
         .expect("close trigger is HtmlElement");
 
-    assert_eq!(close_trigger.tag_name(), "BUTTON");
+    assert_eq!(close_trigger.tag_name(), "SPAN");
     assert_eq!(
         close_trigger.get_attribute("tabindex").as_deref(),
-        Some("-1"),
+        None,
         "close trigger must NOT participate in roving tabindex"
     );
 
@@ -3492,14 +3833,14 @@ async fn repeated_and_composing_close_hotkeys_do_not_emit_close_requests() {
         let parent = container();
 
         let closable_tabs = vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 ViewFn::from(|| view! { "First" }),
                 ViewFn::from(|| view! { <p>"Panel one"</p> }),
             )
             .closable(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 ViewFn::from(|| view! { "Second" }),
@@ -3586,7 +3927,7 @@ async fn repeated_and_composing_manual_activation_hotkeys_do_not_select() {
                 <Tabs
                     default_value="second"
                     tabs=store_field(three_tabs())
-                    activation_mode=ActivationMode::Manual
+                    activation_mode=tabs::ActivationMode::Manual
                 />
             }
         });
@@ -3638,14 +3979,14 @@ async fn close_trigger_click_does_not_select_its_tab() {
         let parent = container();
 
         let tabs = vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 ViewFn::from(|| view! { "First" }),
                 ViewFn::from(|| view! { <p>"Panel one"</p> }),
             )
             .closable(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 ViewFn::from(|| view! { "Second" }),
@@ -3710,13 +4051,13 @@ async fn disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() {
         let parent = container();
 
         let tabs = vec![
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "first",
                 "First",
                 ViewFn::from(|| view! { "First" }),
                 ViewFn::from(|| view! { <p>"Panel one"</p> }),
             ),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "second",
                 "Second",
                 ViewFn::from(|| view! { "Second" }),
@@ -3724,7 +4065,7 @@ async fn disabled_tabs_ignore_direct_click_close_key_and_reorder_shortcut() {
             )
             .closable(true)
             .disabled(true),
-            Tab::new_with_label(
+            tabs::Tab::new_with_label(
                 "third",
                 "Third",
                 ViewFn::from(|| view! { "Third" }),
@@ -3900,7 +4241,7 @@ async fn store_pop_removes_tab_at_runtime_via_set_tabs_redispatch() {
     let (mount_handle, parent, store) = owner.with(|| {
         let parent = container();
         let store = store_handle(three_tabs());
-        let field: Field<Vec<TestTab>> = store.tabs().into();
+        let field: tabs::Field<Vec<TestTab>> = store.tabs().into();
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! { <Tabs default_value="first" tabs=field /> }
@@ -3969,7 +4310,7 @@ async fn store_push_adds_tab_at_runtime_via_set_tabs_redispatch() {
     let (mount_handle, parent, store) = owner.with(|| {
         let parent = container();
         let store = store_handle(three_tabs());
-        let field: Field<Vec<TestTab>> = store.tabs().into();
+        let field: tabs::Field<Vec<TestTab>> = store.tabs().into();
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! { <Tabs default_value="first" tabs=field /> }
@@ -3984,7 +4325,7 @@ async fn store_push_adds_tab_at_runtime_via_set_tabs_redispatch() {
 
     // Append a fourth tab.
     owner.with(|| {
-        store.tabs().write().push(Tab::new_with_label(
+        store.tabs().write().push(tabs::Tab::new_with_label(
             "fourth",
             "Fourth",
             ViewFn::from(|| view! { "Fourth" }),
@@ -4015,35 +4356,33 @@ async fn store_push_adds_tab_at_runtime_via_set_tabs_redispatch() {
 
 #[wasm_bindgen_test]
 fn reorder_announcement_uses_messages_template() {
-    use ars_components::navigation::tabs::{Machine, Messages, Props, TabRegistration};
+    use ars_components::navigation::tabs as core_tabs;
     use ars_core::{Env, MessageFn, Service};
 
     // Direct test against the agnostic Api so we verify the template
     // path without needing a custom-Messages provider in the adapter.
-    let messages = Messages {
+    let messages = core_tabs::Messages {
         reorder_announce_label: MessageFn::new(
             |label: &str, position: usize, total: usize, _locale: &ars_core::Locale| {
                 format!("CUSTOM {label} @ {position}/{total}")
             },
         ),
-        ..Messages::default()
+        ..core_tabs::Messages::default()
     };
 
-    let mut service = Service::<Machine>::new(
-        Props::new()
+    let mut service = Service::<core_tabs::Machine>::new(
+        core_tabs::Props::new()
             .id("reorder-i18n")
             .default_value(Some(Key::str("a"))),
         &Env::default(),
         &messages,
     );
 
-    drop(
-        service.send(ars_components::navigation::tabs::Event::SetTabs(vec![
-            TabRegistration::new(Key::str("a")),
-            TabRegistration::new(Key::str("b")),
-            TabRegistration::new(Key::str("c")),
-        ])),
-    );
+    drop(service.send(core_tabs::Event::SetTabs(vec![
+        core_tabs::TabRegistration::new(Key::str("a")),
+        core_tabs::TabRegistration::new(Key::str("b")),
+        core_tabs::TabRegistration::new(Key::str("c")),
+    ])));
 
     let api = service.connect(&|_| {});
     let announcement = api.reorder_announcement("Inbox", 2, 3);
@@ -4084,13 +4423,17 @@ async fn close_label_uses_live_provider_messages_after_locale_changes() {
                 <Tabs
                     default_value="overview"
                     tabs=[
-                        Tab::new_static(
+                        tabs::Tab::new_static(
                                 "overview",
                                 "Overview",
                                 || view! { <p>"Overview panel"</p> },
                             )
                             .closable(true),
-                        Tab::new_static("details", "Details", || view! { <p>"Details panel"</p> }),
+                        tabs::Tab::new_static(
+                            "details",
+                            "Details",
+                            || view! { <p>"Details panel"</p> },
+                        ),
                     ]
                 />
             </ArsProvider>
@@ -4127,7 +4470,7 @@ async fn store_closable_toggle_redispatches_set_tabs() {
     let (mount_handle, parent, store) = owner.with(|| {
         let parent = container();
         let store = store_handle(three_tabs());
-        let field: Field<Vec<TestTab>> = store.tabs().into();
+        let field: tabs::Field<Vec<TestTab>> = store.tabs().into();
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! { <Tabs default_value="first" tabs=field /> }
@@ -4150,12 +4493,12 @@ async fn store_closable_toggle_redispatches_set_tabs() {
     // Flip the second tab to closable via store mutation. The keyed
     // <For> preserves the row's DOM node, but `render_tab_button`
     // subscribes reactively to `tabs.read()` to read the row's
-    // `closable` flag — so the close button surfaces without
+    // `closable` flag — so the close affordance surfaces without
     // remounting the parent row.
     owner.with(|| {
         let field = store.tabs();
         let mut tabs = field.write();
-        let second = Tab::new_with_label(
+        let second = tabs::Tab::new_with_label(
             "second",
             "Second",
             ViewFn::from(|| view! { "Second" }),
@@ -4187,7 +4530,7 @@ async fn store_disabled_toggle_updates_tab_accessibility_attrs() {
     let (mount_handle, parent, store) = owner.with(|| {
         let parent = container();
         let store = store_handle(three_tabs());
-        let field: Field<Vec<TestTab>> = store.tabs().into();
+        let field: tabs::Field<Vec<TestTab>> = store.tabs().into();
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! { <Tabs default_value="first" tabs=field /> }
@@ -4207,7 +4550,7 @@ async fn store_disabled_toggle_updates_tab_accessibility_attrs() {
         let field = store.tabs();
         let mut tabs = field.write();
 
-        tabs[1] = Tab::new_with_label(
+        tabs[1] = tabs::Tab::new_with_label(
             "second",
             "Second",
             ViewFn::from(|| view! { "Second" }),
@@ -4241,7 +4584,7 @@ async fn store_same_key_row_update_refreshes_trigger_and_panel_content() {
     let (mount_handle, parent, store) = owner.with(|| {
         let parent = container();
         let store = store_handle(three_tabs());
-        let field: Field<Vec<TestTab>> = store.tabs().into();
+        let field: tabs::Field<Vec<TestTab>> = store.tabs().into();
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! { <Tabs default_value="first" tabs=field /> }
@@ -4262,7 +4605,7 @@ async fn store_same_key_row_update_refreshes_trigger_and_panel_content() {
         let field = store.tabs();
         let mut tabs = field.write();
 
-        tabs[0] = Tab::new_with_label(
+        tabs[0] = tabs::Tab::new_with_label(
             "first",
             "First",
             ViewFn::from(|| view! { "First updated trigger" }),
@@ -4415,7 +4758,9 @@ async fn signal_backed_reorderable_updates_draggable_tabs() {
     leptos::task::tick().await;
 
     assert_eq!(
-        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        tab_shell_at(&parent, 0)
+            .get_attribute("draggable")
+            .as_deref(),
         Some("false"),
         "tabs should not advertise drag affordance before reorderable is enabled"
     );
@@ -4430,7 +4775,9 @@ async fn signal_backed_reorderable_updates_draggable_tabs() {
     leptos::task::tick().await;
 
     assert_eq!(
-        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        tab_shell_at(&parent, 0)
+            .get_attribute("draggable")
+            .as_deref(),
         Some("true"),
         "draggable attrs should track signal-backed reorderable"
     );
@@ -4452,7 +4799,9 @@ async fn signal_backed_reorderable_updates_draggable_tabs() {
     leptos::task::tick().await;
 
     assert_eq!(
-        tab_at(&parent, 0).get_attribute("draggable").as_deref(),
+        tab_shell_at(&parent, 0)
+            .get_attribute("draggable")
+            .as_deref(),
         Some("false"),
         "draggable attr should turn off when reorderable turns off"
     );

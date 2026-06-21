@@ -198,7 +198,7 @@ pub fn Avatar(props: AvatarSketchProps) -> Element {
 
     use_effect(move || {
         if let Some(src) = props.src.as_ref() {
-            if let Some(value) = src.read().clone() {
+            if let Some(value) = src.cloned() {
                 machine.send.call(avatar::Event::SetSrc(value));
             }
         }

@@ -1,8 +1,4 @@
-use ars_leptos::{
-    navigation::tabs::{Tab, Tabs},
-    prelude::{TabKey, Translate, t},
-};
-use leptos::prelude::*;
+use ars_leptos::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, TabKey, Translate)]
 #[tab_key(ordinal)]
@@ -70,8 +66,8 @@ pub(crate) enum NavigationText {
     KeyboardClosable,
 
     #[translate(
-        en_US = "Closable tabs render an extra close button and accept Delete / Backspace to fire CloseTab.",
-        pt_BR = "Abas fecháveis renderizam um botão extra de fechar e aceitam Delete / Backspace para disparar CloseTab."
+        en_US = "Closable tabs render an extra close affordance and accept Delete / Backspace to fire CloseTab.",
+        pt_BR = "Abas fecháveis renderizam um acionador extra de fechar e aceitam Delete / Backspace para disparar CloseTab."
     )]
     ClosablePanel,
 
@@ -88,7 +84,7 @@ pub(crate) fn NavigationPanel() -> impl IntoView {
         <section>
             <h3>{t(NavigationText::TabsHeading)}</h3>
             <p>{t(NavigationText::TabsDemoSummary)}</p>
-            <Tabs
+            <tabs::Root
                 default_value=NavigationTab::Overview
                 tabs=[
                     Tab::new(
@@ -128,7 +124,24 @@ pub(crate) fn NavigationPanel() -> impl IntoView {
                         .disabled(true),
                 ]
                 reorderable=true
-            />
+            >
+                <tabs::List<
+                NavigationTab,
+            > tab_row=|item| {
+                    view! {
+                        <tabs::TabShell item>
+                            <tabs::Trigger<NavigationTab> />
+                            <tabs::CloseTrigger<NavigationTab> />
+                        </tabs::TabShell>
+                    }
+                } />
+                <tabs::Panels<
+                NavigationTab,
+            > panel=|item| {
+                    view! { <tabs::Panel item /> }
+                } />
+                <tabs::LiveRegion />
+            </tabs::Root>
         </section>
     }
 }

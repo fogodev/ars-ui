@@ -234,14 +234,14 @@ let control_attrs = machine.derive(|api| api.control_attrs());
 let hidden_input_attrs = machine.derive(|api| api.hidden_input_attrs());
 
 rsx! {
-    div { ..machine.derive(|api| api.root_attrs()).read().clone(),
-        label { ..machine.derive(|api| api.label_attrs()).read().clone(), {children} }
+    div { ..machine.derive(|api| api.root_attrs()).cloned(),
+        label { ..machine.derive(|api| api.label_attrs()).cloned(), {children} }
         div {
-            ..control_attrs.read().clone(),
+            ..control_attrs.cloned(),
             onclick: move |_| machine.send.call(checkbox::Event::Toggle),
-            div { ..machine.derive(|api| api.indicator_attrs()).read().clone() }
+            div { ..machine.derive(|api| api.indicator_attrs()).cloned() }
         }
-        input { ..hidden_input_attrs.read().clone() }
+        input { ..hidden_input_attrs.cloned() }
     }
 }
 ```
