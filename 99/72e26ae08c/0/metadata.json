@@ -1,0 +1,1021 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "9972e26ae08c",
+  "session_id": "019ed138-54c9-72c2-a294-7cd525eddd48",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-21T04:23:55.77539Z",
+  "branch": "codex/tabs-public-parts-styled-split",
+  "checkpoints_count": 67,
+  "files_touched": [
+    ".agents/skills/post-implementation-audit/SKILL.md",
+    ".agents/skills/tailwind-v4/SKILL.md",
+    ".vscode/settings.json",
+    "crates/ars-components/src/navigation/tabs/mod.rs",
+    "crates/ars-components/src/navigation/tabs/snapshots/ars_components__navigation__tabs__tests__tabs_close_trigger_custom_label.snap",
+    "crates/ars-components/src/navigation/tabs/snapshots/ars_components__navigation__tabs__tests__tabs_close_trigger_default_label.snap",
+    "crates/ars-components/src/navigation/tabs/snapshots/ars_components__navigation__tabs__tests__tabs_close_trigger_unicode_label.snap",
+    "crates/ars-components/src/navigation/tabs/tests.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/tabs.rs",
+    "crates/ars-dioxus-components/src/lib.rs",
+    "crates/ars-dioxus-components/src/navigation/mod.rs",
+    "crates/ars-dioxus-components/src/navigation/tabs/css.rs",
+    "crates/ars-dioxus-components/src/navigation/tabs/mod.rs",
+    "crates/ars-dioxus-components/src/navigation/tabs/tabs.css",
+    "crates/ars-dioxus-components/src/navigation/tabs/tailwind.rs",
+    "crates/ars-dioxus-components/src/prelude.rs",
+    "crates/ars-dioxus/src/lib.rs",
+    "crates/ars-dioxus/src/navigation/tabs.rs",
+    "crates/ars-dioxus/src/nonce.rs",
+    "crates/ars-dioxus/src/prelude.rs",
+    "crates/ars-dioxus/src/provider.rs",
+    "crates/ars-dioxus/src/safe_listener.rs",
+    "crates/ars-dioxus/src/utility/highlight.rs",
+    "crates/ars-dioxus/tests/attr_passthrough.rs",
+    "crates/ars-dioxus/tests/tabs.rs",
+    "crates/ars-dioxus/tests/tabs_wasm.rs",
+    "crates/ars-e2e/fixtures/dioxus/src/categories/navigation.rs",
+    "crates/ars-e2e/fixtures/dioxus/src/main.rs",
+    "crates/ars-e2e/fixtures/leptos/src/categories/input.rs",
+    "crates/ars-e2e/fixtures/leptos/src/categories/navigation.rs",
+    "crates/ars-e2e/fixtures/leptos/src/main.rs",
+    "crates/ars-e2e/src/axe.rs",
+    "crates/ars-e2e/src/widgets.rs",
+    "crates/ars-leptos-components/src/lib.rs",
+    "crates/ars-leptos-components/src/navigation/mod.rs",
+    "crates/ars-leptos-components/src/navigation/tabs/css.rs",
+    "crates/ars-leptos-components/src/navigation/tabs/mod.rs",
+    "crates/ars-leptos-components/src/navigation/tabs/tabs.css",
+    "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs",
+    "crates/ars-leptos-components/src/prelude.rs",
+    "crates/ars-leptos/Cargo.toml",
+    "crates/ars-leptos/src/lib.rs",
+    "crates/ars-leptos/src/navigation/tabs.rs",
+    "crates/ars-leptos/src/prelude.rs",
+    "crates/ars-leptos/tests/tabs.rs",
+    "crates/ars-leptos/tests/tabs_wasm.rs",
+    "docs/implementation/adapter-components/02-adapter-api-and-wiring.md",
+    "docs/implementation/adapter-components/03-framework-rules.md",
+    "docs/implementation/adapter-components/04-adapter-tests.md",
+    "docs/implementation/adapter-components/12-parity-audit-loop.md",
+    "docs/implementation/adapter-components/14-retrofit-audits.md",
+    "docs/implementation/adapter-components/checklists/component-delivery.md",
+    "docs/implementation/sketches/tabs-counterpart-audit-sketch.md",
+    "examples/widgets-dioxus-css/public/style.css",
+    "examples/widgets-dioxus-css/src/categories/mod.rs",
+    "examples/widgets-dioxus-css/src/categories/navigation.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/mod.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/navigation.rs",
+    "examples/widgets-dioxus-tailwind/tailwind.css",
+    "examples/widgets-dioxus/src/categories/mod.rs",
+    "examples/widgets-dioxus/src/categories/navigation.rs",
+    "examples/widgets-leptos-css/assets/style.css",
+    "examples/widgets-leptos-css/src/categories/mod.rs",
+    "examples/widgets-leptos-css/src/categories/navigation.rs",
+    "examples/widgets-leptos-tailwind/src/categories/mod.rs",
+    "examples/widgets-leptos-tailwind/src/categories/navigation.rs",
+    "examples/widgets-leptos-tailwind/tailwind.css",
+    "examples/widgets-leptos/src/categories/mod.rs",
+    "examples/widgets-leptos/src/categories/navigation.rs",
+    "spec/components/navigation/tabs.md",
+    "spec/dioxus-components/data-display/avatar.md",
+    "spec/dioxus-components/data-display/progress.md",
+    "spec/dioxus-components/date-time/calendar.md",
+    "spec/dioxus-components/date-time/date-field.md",
+    "spec/dioxus-components/date-time/range-calendar.md",
+    "spec/dioxus-components/date-time/time-field.md",
+    "spec/dioxus-components/input/checkbox-group.md",
+    "spec/dioxus-components/input/checkbox.md",
+    "spec/dioxus-components/input/editable.md",
+    "spec/dioxus-components/input/number-input.md",
+    "spec/dioxus-components/input/password-input.md",
+    "spec/dioxus-components/input/pin-input.md",
+    "spec/dioxus-components/input/radio-group.md",
+    "spec/dioxus-components/input/range-slider.md",
+    "spec/dioxus-components/input/search-input.md",
+    "spec/dioxus-components/input/slider.md",
+    "spec/dioxus-components/input/switch.md",
+    "spec/dioxus-components/input/text-field.md",
+    "spec/dioxus-components/input/textarea.md",
+    "spec/dioxus-components/layout/portal.md",
+    "spec/dioxus-components/navigation/tabs.md",
+    "spec/dioxus-components/overlay/alert-dialog.md",
+    "spec/dioxus-components/overlay/dialog.md",
+    "spec/dioxus-components/overlay/drawer.md",
+    "spec/dioxus-components/overlay/floating-panel.md",
+    "spec/dioxus-components/overlay/popover.md",
+    "spec/dioxus-components/overlay/presence.md",
+    "spec/dioxus-components/overlay/tooltip.md",
+    "spec/dioxus-components/overlay/tour.md",
+    "spec/dioxus-components/specialized/angle-slider.md",
+    "spec/dioxus-components/specialized/clipboard.md",
+    "spec/dioxus-components/specialized/color-area.md",
+    "spec/dioxus-components/specialized/color-field.md",
+    "spec/dioxus-components/specialized/color-slider.md",
+    "spec/dioxus-components/specialized/color-swatch-picker.md",
+    "spec/dioxus-components/specialized/color-wheel.md",
+    "spec/dioxus-components/specialized/file-upload.md",
+    "spec/dioxus-components/specialized/image-cropper.md",
+    "spec/dioxus-components/specialized/signature-pad.md",
+    "spec/dioxus-components/specialized/timer.md",
+    "spec/dioxus-components/utility/action-group.md",
+    "spec/dioxus-components/utility/button.md",
+    "spec/dioxus-components/utility/dismissable.md",
+    "spec/dioxus-components/utility/drop-zone.md",
+    "spec/dioxus-components/utility/field.md",
+    "spec/dioxus-components/utility/fieldset.md",
+    "spec/dioxus-components/utility/focus-scope.md",
+    "spec/dioxus-components/utility/form.md",
+    "spec/dioxus-components/utility/live-region.md",
+    "spec/dioxus-components/utility/swap.md",
+    "spec/dioxus-components/utility/toggle-button.md",
+    "spec/dioxus-components/utility/toggle-group.md",
+    "spec/dioxus-components/utility/toggle.md",
+    "spec/foundation/09-adapter-dioxus.md",
+    "spec/leptos-components/navigation/tabs.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "5a110272d835",
+  "token_usage": {
+    "input_tokens": 12678353,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 244759808,
+    "output_tokens": 714644,
+    "api_call_count": 1758
+  },
+  "session_metrics": {
+    "turn_count": 68
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-21T04:23:53.150279Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 3357,
+    "human_removed": 1817,
+    "total_committed": 2319,
+    "total_lines_changed": 5174,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 612,
+      "agent_lines_removed": 231
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 970,
+      "agent_lines_removed": 268
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 970,
+      "agent_lines_removed": 268
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 2,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1627,
+      "agent_lines_removed": 365,
+      "user_added_per_file": {
+        "crates/ars-components/src/navigation/tabs/tests.rs": 1,
+        "crates/ars-dioxus/src/navigation/tabs.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1629,
+      "agent_lines_removed": 365
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1629,
+      "agent_lines_removed": 365
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1629,
+      "agent_lines_removed": 365
+    },
+    {
+      "checkpoint_number": 9,
+      "user_lines_added": 1,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1794,
+      "agent_lines_removed": 371,
+      "user_added_per_file": {
+        "crates/ars-dioxus/src/navigation/tabs.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 10,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1795,
+      "agent_lines_removed": 371
+    },
+    {
+      "checkpoint_number": 11,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1795,
+      "agent_lines_removed": 371
+    },
+    {
+      "checkpoint_number": 12,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1795,
+      "agent_lines_removed": 371
+    },
+    {
+      "checkpoint_number": 13,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1795,
+      "agent_lines_removed": 371
+    },
+    {
+      "checkpoint_number": 14,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1795,
+      "agent_lines_removed": 371
+    },
+    {
+      "checkpoint_number": 15,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1795,
+      "agent_lines_removed": 371
+    },
+    {
+      "checkpoint_number": 16,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1795,
+      "agent_lines_removed": 371
+    },
+    {
+      "checkpoint_number": 17,
+      "user_lines_added": 84,
+      "user_lines_removed": 2,
+      "agent_lines_added": 1795,
+      "agent_lines_removed": 371,
+      "user_added_per_file": {
+        "crates/ars-dioxus/tests/tabs.rs": 32,
+        "crates/ars-leptos/src/navigation/tabs.rs": 24,
+        "crates/ars-leptos/tests/tabs.rs": 28
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/tests/tabs.rs": 1,
+        "crates/ars-leptos/tests/tabs.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 18,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3189,
+      "agent_lines_removed": 726
+    },
+    {
+      "checkpoint_number": 19,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3189,
+      "agent_lines_removed": 726
+    },
+    {
+      "checkpoint_number": 20,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3746,
+      "agent_lines_removed": 788
+    },
+    {
+      "checkpoint_number": 21,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3746,
+      "agent_lines_removed": 788
+    },
+    {
+      "checkpoint_number": 22,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3746,
+      "agent_lines_removed": 788
+    },
+    {
+      "checkpoint_number": 23,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3746,
+      "agent_lines_removed": 788
+    },
+    {
+      "checkpoint_number": 24,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3746,
+      "agent_lines_removed": 788
+    },
+    {
+      "checkpoint_number": 25,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3746,
+      "agent_lines_removed": 788
+    },
+    {
+      "checkpoint_number": 26,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3746,
+      "agent_lines_removed": 788
+    },
+    {
+      "checkpoint_number": 27,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3746,
+      "agent_lines_removed": 788
+    },
+    {
+      "checkpoint_number": 28,
+      "user_lines_added": 449,
+      "user_lines_removed": 357,
+      "agent_lines_added": 4049,
+      "agent_lines_removed": 906,
+      "user_added_per_file": {
+        "crates/ars-components/src/navigation/tabs/mod.rs": 1,
+        "crates/ars-components/src/navigation/tabs/tests.rs": 6,
+        "crates/ars-dioxus/src/navigation/tabs.rs": 136,
+        "crates/ars-dioxus/src/nonce.rs": 1,
+        "crates/ars-dioxus/src/provider.rs": 4,
+        "crates/ars-dioxus/src/safe_listener.rs": 1,
+        "crates/ars-dioxus/src/utility/highlight.rs": 1,
+        "spec/dioxus-components/data-display/avatar.md": 1,
+        "spec/dioxus-components/data-display/progress.md": 2,
+        "spec/dioxus-components/date-time/calendar.md": 1,
+        "spec/dioxus-components/date-time/date-field.md": 1,
+        "spec/dioxus-components/date-time/range-calendar.md": 1,
+        "spec/dioxus-components/date-time/time-field.md": 1,
+        "spec/dioxus-components/input/checkbox-group.md": 2,
+        "spec/dioxus-components/input/checkbox.md": 5,
+        "spec/dioxus-components/input/editable.md": 3,
+        "spec/dioxus-components/input/number-input.md": 5,
+        "spec/dioxus-components/input/password-input.md": 4,
+        "spec/dioxus-components/input/pin-input.md": 3,
+        "spec/dioxus-components/input/radio-group.md": 9,
+        "spec/dioxus-components/input/range-slider.md": 7,
+        "spec/dioxus-components/input/search-input.md": 4,
+        "spec/dioxus-components/input/slider.md": 5,
+        "spec/dioxus-components/input/switch.md": 5,
+        "spec/dioxus-components/input/text-field.md": 4,
+        "spec/dioxus-components/input/textarea.md": 3,
+        "spec/dioxus-components/layout/portal.md": 1,
+        "spec/dioxus-components/overlay/alert-dialog.md": 5,
+        "spec/dioxus-components/overlay/dialog.md": 1,
+        "spec/dioxus-components/overlay/drawer.md": 43,
+        "spec/dioxus-components/overlay/floating-panel.md": 10,
+        "spec/dioxus-components/overlay/popover.md": 1,
+        "spec/dioxus-components/overlay/presence.md": 2,
+        "spec/dioxus-components/overlay/tooltip.md": 1,
+        "spec/dioxus-components/overlay/tour.md": 11,
+        "spec/dioxus-components/specialized/angle-slider.md": 1,
+        "spec/dioxus-components/specialized/clipboard.md": 2,
+        "spec/dioxus-components/specialized/color-area.md": 1,
+        "spec/dioxus-components/specialized/color-field.md": 1,
+        "spec/dioxus-components/specialized/color-slider.md": 1,
+        "spec/dioxus-components/specialized/color-swatch-picker.md": 1,
+        "spec/dioxus-components/specialized/color-wheel.md": 1,
+        "spec/dioxus-components/specialized/file-upload.md": 1,
+        "spec/dioxus-components/specialized/image-cropper.md": 1,
+        "spec/dioxus-components/specialized/signature-pad.md": 1,
+        "spec/dioxus-components/specialized/timer.md": 1,
+        "spec/dioxus-components/utility/action-group.md": 1,
+        "spec/dioxus-components/utility/button.md": 8,
+        "spec/dioxus-components/utility/dismissable.md": 1,
+        "spec/dioxus-components/utility/drop-zone.md": 1,
+        "spec/dioxus-components/utility/field.md": 32,
+        "spec/dioxus-components/utility/fieldset.md": 46,
+        "spec/dioxus-components/utility/focus-scope.md": 1,
+        "spec/dioxus-components/utility/form.md": 45,
+        "spec/dioxus-components/utility/live-region.md": 1,
+        "spec/dioxus-components/utility/swap.md": 3,
+        "spec/dioxus-components/utility/toggle-button.md": 1,
+        "spec/dioxus-components/utility/toggle-group.md": 1,
+        "spec/dioxus-components/utility/toggle.md": 1,
+        "spec/foundation/09-adapter-dioxus.md": 4
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/src/navigation/tabs.rs": 104,
+        "crates/ars-dioxus/src/nonce.rs": 1,
+        "crates/ars-dioxus/src/provider.rs": 6,
+        "crates/ars-dioxus/src/safe_listener.rs": 1,
+        "crates/ars-dioxus/src/utility/highlight.rs": 1,
+        "spec/dioxus-components/data-display/avatar.md": 1,
+        "spec/dioxus-components/data-display/progress.md": 2,
+        "spec/dioxus-components/date-time/calendar.md": 1,
+        "spec/dioxus-components/date-time/date-field.md": 1,
+        "spec/dioxus-components/date-time/range-calendar.md": 1,
+        "spec/dioxus-components/date-time/time-field.md": 1,
+        "spec/dioxus-components/input/checkbox-group.md": 2,
+        "spec/dioxus-components/input/checkbox.md": 5,
+        "spec/dioxus-components/input/editable.md": 3,
+        "spec/dioxus-components/input/number-input.md": 5,
+        "spec/dioxus-components/input/password-input.md": 4,
+        "spec/dioxus-components/input/pin-input.md": 3,
+        "spec/dioxus-components/input/radio-group.md": 9,
+        "spec/dioxus-components/input/range-slider.md": 7,
+        "spec/dioxus-components/input/search-input.md": 4,
+        "spec/dioxus-components/input/slider.md": 5,
+        "spec/dioxus-components/input/switch.md": 5,
+        "spec/dioxus-components/input/text-field.md": 4,
+        "spec/dioxus-components/input/textarea.md": 3,
+        "spec/dioxus-components/layout/portal.md": 1,
+        "spec/dioxus-components/overlay/alert-dialog.md": 5,
+        "spec/dioxus-components/overlay/dialog.md": 1,
+        "spec/dioxus-components/overlay/drawer.md": 43,
+        "spec/dioxus-components/overlay/floating-panel.md": 10,
+        "spec/dioxus-components/overlay/popover.md": 1,
+        "spec/dioxus-components/overlay/presence.md": 2,
+        "spec/dioxus-components/overlay/tooltip.md": 1,
+        "spec/dioxus-components/overlay/tour.md": 11,
+        "spec/dioxus-components/specialized/angle-slider.md": 1,
+        "spec/dioxus-components/specialized/clipboard.md": 2,
+        "spec/dioxus-components/specialized/color-area.md": 1,
+        "spec/dioxus-components/specialized/color-field.md": 1,
+        "spec/dioxus-components/specialized/color-slider.md": 1,
+        "spec/dioxus-components/specialized/color-swatch-picker.md": 1,
+        "spec/dioxus-components/specialized/color-wheel.md": 1,
+        "spec/dioxus-components/specialized/file-upload.md": 1,
+        "spec/dioxus-components/specialized/image-cropper.md": 1,
+        "spec/dioxus-components/specialized/signature-pad.md": 1,
+        "spec/dioxus-components/specialized/timer.md": 1,
+        "spec/dioxus-components/utility/action-group.md": 1,
+        "spec/dioxus-components/utility/button.md": 8,
+        "spec/dioxus-components/utility/dismissable.md": 1,
+        "spec/dioxus-components/utility/drop-zone.md": 1,
+        "spec/dioxus-components/utility/field.md": 19,
+        "spec/dioxus-components/utility/fieldset.md": 25,
+        "spec/dioxus-components/utility/focus-scope.md": 1,
+        "spec/dioxus-components/utility/form.md": 24,
+        "spec/dioxus-components/utility/live-region.md": 1,
+        "spec/dioxus-components/utility/swap.md": 3,
+        "spec/dioxus-components/utility/toggle-button.md": 1,
+        "spec/dioxus-components/utility/toggle-group.md": 1,
+        "spec/dioxus-components/utility/toggle.md": 1,
+        "spec/foundation/09-adapter-dioxus.md": 4
+      }
+    },
+    {
+      "checkpoint_number": 29,
+      "user_lines_added": 36,
+      "user_lines_removed": 65,
+      "agent_lines_added": 4279,
+      "agent_lines_removed": 1044,
+      "user_added_per_file": {
+        "crates/ars-components/src/navigation/tabs/mod.rs": 23,
+        "crates/ars-components/src/navigation/tabs/tests.rs": 10,
+        "crates/ars-dioxus/src/navigation/tabs.rs": 2,
+        "crates/ars-leptos/src/navigation/tabs.rs": 1
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/src/navigation/tabs.rs": 39,
+        "crates/ars-leptos/src/navigation/tabs.rs": 26
+      }
+    },
+    {
+      "checkpoint_number": 30,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4331,
+      "agent_lines_removed": 1123
+    },
+    {
+      "checkpoint_number": 31,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4331,
+      "agent_lines_removed": 1123
+    },
+    {
+      "checkpoint_number": 32,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4428,
+      "agent_lines_removed": 1143
+    },
+    {
+      "checkpoint_number": 33,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4428,
+      "agent_lines_removed": 1143
+    },
+    {
+      "checkpoint_number": 34,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4428,
+      "agent_lines_removed": 1143
+    },
+    {
+      "checkpoint_number": 35,
+      "user_lines_added": 5,
+      "user_lines_removed": 5,
+      "agent_lines_added": 4442,
+      "agent_lines_removed": 1150,
+      "user_added_per_file": {
+        "crates/ars-dioxus/src/navigation/tabs.rs": 5
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/src/navigation/tabs.rs": 5
+      }
+    },
+    {
+      "checkpoint_number": 36,
+      "user_lines_added": 1,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4466,
+      "agent_lines_removed": 1174,
+      "user_added_per_file": {
+        "crates/ars-leptos/tests/.tabs.rs.pending-snap": 1
+      }
+    },
+    {
+      "checkpoint_number": 37,
+      "user_lines_added": 71,
+      "user_lines_removed": 43,
+      "agent_lines_added": 4760,
+      "agent_lines_removed": 1481,
+      "user_added_per_file": {
+        "crates/ars-dioxus-components/src/navigation/tabs/css.rs": 1,
+        "crates/ars-dioxus-components/src/navigation/tabs/tabs.css": 27,
+        "crates/ars-dioxus-components/src/navigation/tabs/tailwind.rs": 1,
+        "crates/ars-dioxus/src/lib.rs": 3,
+        "crates/ars-dioxus/src/prelude.rs": 4,
+        "crates/ars-dioxus/tests/tabs_wasm.rs": 24,
+        "crates/ars-leptos/src/lib.rs": 3,
+        "crates/ars-leptos/src/prelude.rs": 4,
+        "crates/ars-leptos/tests/.tabs.rs.pending-snap": 4
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus-components/src/navigation/tabs/css.rs": 3,
+        "crates/ars-dioxus-components/src/navigation/tabs/tabs.css": 27,
+        "crates/ars-dioxus-components/src/navigation/tabs/tailwind.rs": 3,
+        "crates/ars-dioxus/src/lib.rs": 4,
+        "crates/ars-dioxus/src/prelude.rs": 1,
+        "crates/ars-leptos/src/lib.rs": 4,
+        "crates/ars-leptos/src/prelude.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 38,
+      "user_lines_added": 106,
+      "user_lines_removed": 106,
+      "agent_lines_added": 4774,
+      "agent_lines_removed": 1475,
+      "user_added_per_file": {
+        "docs/implementation/sketches/tabs-counterpart-audit-sketch.md": 71,
+        "spec/components/navigation/tabs.md": 3,
+        "spec/dioxus-components/navigation/tabs.md": 16,
+        "spec/leptos-components/navigation/tabs.md": 16
+      },
+      "user_removed_per_file": {
+        "docs/implementation/sketches/tabs-counterpart-audit-sketch.md": 71,
+        "spec/components/navigation/tabs.md": 3,
+        "spec/dioxus-components/navigation/tabs.md": 16,
+        "spec/leptos-components/navigation/tabs.md": 16
+      }
+    },
+    {
+      "checkpoint_number": 39,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4841,
+      "agent_lines_removed": 1538
+    },
+    {
+      "checkpoint_number": 40,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4841,
+      "agent_lines_removed": 1538
+    },
+    {
+      "checkpoint_number": 41,
+      "user_lines_added": 38,
+      "user_lines_removed": 20,
+      "agent_lines_added": 4859,
+      "agent_lines_removed": 1538,
+      "user_added_per_file": {
+        "crates/ars-leptos/src/navigation/tabs.rs": 38
+      },
+      "user_removed_per_file": {
+        "crates/ars-leptos/src/navigation/tabs.rs": 20
+      }
+    },
+    {
+      "checkpoint_number": 42,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4874,
+      "agent_lines_removed": 1535
+    },
+    {
+      "checkpoint_number": 43,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4874,
+      "agent_lines_removed": 1535
+    },
+    {
+      "checkpoint_number": 44,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4874,
+      "agent_lines_removed": 1535
+    },
+    {
+      "checkpoint_number": 45,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4874,
+      "agent_lines_removed": 1535
+    },
+    {
+      "checkpoint_number": 46,
+      "user_lines_added": 78,
+      "user_lines_removed": 100,
+      "agent_lines_added": 4897,
+      "agent_lines_removed": 1538,
+      "user_added_per_file": {
+        "crates/ars-leptos-components/src/navigation/tabs/css.rs": 1,
+        "crates/ars-leptos-components/src/navigation/tabs/tabs.css": 27,
+        "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs": 2,
+        "crates/ars-leptos/src/navigation/tabs.rs": 3,
+        "docs/implementation/sketches/tabs-counterpart-audit-sketch.md": 17,
+        "examples/widgets-dioxus-css/src/categories/mod.rs": 1,
+        "examples/widgets-dioxus-css/src/categories/navigation.rs": 1,
+        "examples/widgets-dioxus-tailwind/src/categories/mod.rs": 1,
+        "examples/widgets-dioxus-tailwind/src/categories/navigation.rs": 1,
+        "examples/widgets-dioxus/src/categories/mod.rs": 9,
+        "examples/widgets-dioxus/src/categories/navigation.rs": 4,
+        "examples/widgets-leptos/src/categories/mod.rs": 9,
+        "spec/dioxus-components/navigation/tabs.md": 1,
+        "spec/leptos-components/navigation/tabs.md": 1
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/tests/tabs.rs": 10,
+        "crates/ars-leptos-components/src/navigation/tabs/tabs.css": 27,
+        "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs": 1,
+        "crates/ars-leptos/src/navigation/tabs.rs": 3,
+        "crates/ars-leptos/tests/tabs.rs": 10,
+        "docs/implementation/sketches/tabs-counterpart-audit-sketch.md": 17,
+        "examples/widgets-dioxus-css/src/categories/mod.rs": 2,
+        "examples/widgets-dioxus-css/src/categories/navigation.rs": 2,
+        "examples/widgets-dioxus-tailwind/src/categories/mod.rs": 2,
+        "examples/widgets-dioxus-tailwind/src/categories/navigation.rs": 2,
+        "examples/widgets-dioxus/src/categories/mod.rs": 9,
+        "examples/widgets-dioxus/src/categories/navigation.rs": 4,
+        "examples/widgets-leptos/src/categories/mod.rs": 9,
+        "spec/dioxus-components/navigation/tabs.md": 1,
+        "spec/leptos-components/navigation/tabs.md": 1
+      }
+    },
+    {
+      "checkpoint_number": 47,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4857,
+      "agent_lines_removed": 1520
+    },
+    {
+      "checkpoint_number": 48,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4857,
+      "agent_lines_removed": 1520
+    },
+    {
+      "checkpoint_number": 49,
+      "user_lines_added": 152,
+      "user_lines_removed": 139,
+      "agent_lines_added": 4964,
+      "agent_lines_removed": 1520,
+      "user_added_per_file": {
+        "crates/ars-leptos/src/navigation/tabs.rs": 121,
+        "docs/implementation/sketches/tabs-counterpart-audit-sketch.md": 13,
+        "spec/dioxus-components/navigation/tabs.md": 9,
+        "spec/leptos-components/navigation/tabs.md": 9
+      },
+      "user_removed_per_file": {
+        "crates/ars-leptos/src/navigation/tabs.rs": 108,
+        "docs/implementation/sketches/tabs-counterpart-audit-sketch.md": 13,
+        "spec/dioxus-components/navigation/tabs.md": 9,
+        "spec/leptos-components/navigation/tabs.md": 9
+      }
+    },
+    {
+      "checkpoint_number": 50,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5060,
+      "agent_lines_removed": 1603
+    },
+    {
+      "checkpoint_number": 51,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5117,
+      "agent_lines_removed": 1609
+    },
+    {
+      "checkpoint_number": 52,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5221,
+      "agent_lines_removed": 1653
+    },
+    {
+      "checkpoint_number": 53,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5273,
+      "agent_lines_removed": 1655
+    },
+    {
+      "checkpoint_number": 54,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5323,
+      "agent_lines_removed": 1659
+    },
+    {
+      "checkpoint_number": 55,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5379,
+      "agent_lines_removed": 1661
+    },
+    {
+      "checkpoint_number": 56,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5427,
+      "agent_lines_removed": 1661
+    },
+    {
+      "checkpoint_number": 57,
+      "user_lines_added": 2,
+      "user_lines_removed": 2,
+      "agent_lines_added": 5453,
+      "agent_lines_removed": 1661,
+      "user_added_per_file": {
+        "examples/widgets-dioxus-css/public/style.css": 2
+      },
+      "user_removed_per_file": {
+        "examples/widgets-dioxus-css/public/style.css": 2
+      }
+    },
+    {
+      "checkpoint_number": 58,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5453,
+      "agent_lines_removed": 1661
+    },
+    {
+      "checkpoint_number": 59,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5789,
+      "agent_lines_removed": 1777
+    },
+    {
+      "checkpoint_number": 60,
+      "user_lines_added": 12,
+      "user_lines_removed": 17,
+      "agent_lines_added": 5815,
+      "agent_lines_removed": 1777,
+      "user_added_per_file": {
+        "crates/ars-dioxus/src/navigation/tabs.rs": 12
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/src/navigation/tabs.rs": 17
+      }
+    },
+    {
+      "checkpoint_number": 61,
+      "user_lines_added": 34,
+      "user_lines_removed": 92,
+      "agent_lines_added": 5964,
+      "agent_lines_removed": 1783,
+      "user_added_per_file": {
+        ".vscode/settings.json": 8,
+        "crates/ars-dioxus-components/src/navigation/tabs/tailwind.rs": 4,
+        "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs": 22
+      },
+      "user_removed_per_file": {
+        ".vscode/settings.json": 1,
+        "crates/ars-dioxus-components/src/navigation/tabs/tailwind.rs": 38,
+        "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs": 53
+      }
+    },
+    {
+      "checkpoint_number": 62,
+      "user_lines_added": 59,
+      "user_lines_removed": 9,
+      "agent_lines_added": 5907,
+      "agent_lines_removed": 1784,
+      "user_added_per_file": {
+        "crates/ars-dioxus/src/navigation/tabs.rs": 30,
+        "crates/ars-leptos/src/navigation/tabs.rs": 29
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/src/navigation/tabs.rs": 5,
+        "crates/ars-leptos/src/navigation/tabs.rs": 4
+      }
+    },
+    {
+      "checkpoint_number": 63,
+      "user_lines_added": 490,
+      "user_lines_removed": 555,
+      "agent_lines_added": 6026,
+      "agent_lines_removed": 1785,
+      "user_added_per_file": {
+        "crates/ars-dioxus-components/src/lib.rs": 6,
+        "crates/ars-dioxus-components/src/navigation/tabs/tabs.css": 4,
+        "crates/ars-dioxus-components/src/navigation/tabs/tailwind.rs": 5,
+        "crates/ars-dioxus/src/navigation/tabs.rs": 343,
+        "crates/ars-leptos-components/src/lib.rs": 6,
+        "crates/ars-leptos-components/src/navigation/tabs/css.rs": 13,
+        "crates/ars-leptos-components/src/navigation/tabs/tabs.css": 4,
+        "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs": 6,
+        "docs/implementation/sketches/tabs-counterpart-audit-sketch.md": 5,
+        "examples/widgets-dioxus-css/src/categories/navigation.rs": 3,
+        "examples/widgets-dioxus-tailwind/src/categories/navigation.rs": 6,
+        "examples/widgets-dioxus-tailwind/tailwind.css": 2,
+        "examples/widgets-dioxus/src/categories/navigation.rs": 3,
+        "examples/widgets-leptos-css/assets/style.css": 2,
+        "examples/widgets-leptos-css/src/categories/navigation.rs": 23,
+        "examples/widgets-leptos-tailwind/src/categories/navigation.rs": 32,
+        "examples/widgets-leptos-tailwind/tailwind.css": 2,
+        "examples/widgets-leptos/src/categories/navigation.rs": 15,
+        "spec/dioxus-components/navigation/tabs.md": 5,
+        "spec/leptos-components/navigation/tabs.md": 5
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus-components/src/navigation/tabs/css.rs": 4,
+        "crates/ars-dioxus-components/src/navigation/tabs/tabs.css": 1,
+        "crates/ars-dioxus-components/src/navigation/tabs/tailwind.rs": 11,
+        "crates/ars-dioxus/src/navigation/tabs.rs": 391,
+        "crates/ars-leptos-components/src/navigation/tabs/css.rs": 14,
+        "crates/ars-leptos-components/src/navigation/tabs/tabs.css": 1,
+        "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs": 10,
+        "docs/implementation/sketches/tabs-counterpart-audit-sketch.md": 5,
+        "examples/widgets-dioxus-css/src/categories/navigation.rs": 3,
+        "examples/widgets-dioxus-tailwind/src/categories/navigation.rs": 42,
+        "examples/widgets-dioxus-tailwind/tailwind.css": 2,
+        "examples/widgets-dioxus/src/categories/navigation.rs": 3,
+        "examples/widgets-leptos-css/assets/style.css": 2,
+        "examples/widgets-leptos-css/src/categories/navigation.rs": 14,
+        "examples/widgets-leptos-tailwind/src/categories/navigation.rs": 26,
+        "examples/widgets-leptos-tailwind/tailwind.css": 2,
+        "examples/widgets-leptos/src/categories/navigation.rs": 14,
+        "spec/dioxus-components/navigation/tabs.md": 5,
+        "spec/leptos-components/navigation/tabs.md": 5
+      }
+    },
+    {
+      "checkpoint_number": 64,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 6152,
+      "agent_lines_removed": 1976
+    },
+    {
+      "checkpoint_number": 65,
+      "user_lines_added": 29,
+      "user_lines_removed": 30,
+      "agent_lines_added": 6240,
+      "agent_lines_removed": 2077,
+      "user_added_per_file": {
+        "examples/widgets-leptos-tailwind/src/categories/navigation.rs": 1,
+        "spec/components/navigation/tabs.md": 8,
+        "spec/dioxus-components/navigation/tabs.md": 10,
+        "spec/leptos-components/navigation/tabs.md": 10
+      },
+      "user_removed_per_file": {
+        "examples/widgets-leptos-tailwind/src/categories/navigation.rs": 1,
+        "examples/widgets-leptos-tailwind/tailwind.css": 1,
+        "spec/components/navigation/tabs.md": 8,
+        "spec/dioxus-components/navigation/tabs.md": 10,
+        "spec/leptos-components/navigation/tabs.md": 10
+      }
+    },
+    {
+      "checkpoint_number": 66,
+      "user_lines_added": 421,
+      "user_lines_removed": 503,
+      "agent_lines_added": 6335,
+      "agent_lines_removed": 2085,
+      "user_added_per_file": {
+        "crates/ars-components/src/navigation/tabs/mod.rs": 1,
+        "crates/ars-dioxus-components/src/navigation/tabs/tailwind.rs": 1,
+        "crates/ars-dioxus/src/navigation/tabs.rs": 60,
+        "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs": 7,
+        "crates/ars-leptos/src/navigation/tabs.rs": 352
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/src/navigation/tabs.rs": 62,
+        "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs": 7,
+        "crates/ars-leptos/src/navigation/tabs.rs": 433,
+        "examples/widgets-dioxus-tailwind/tailwind.css": 1
+      }
+    },
+    {
+      "checkpoint_number": 67,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 6516,
+      "agent_lines_removed": 2249
+    },
+    {
+      "checkpoint_number": 68,
+      "user_lines_added": 680,
+      "user_lines_removed": 289,
+      "agent_lines_added": 6568,
+      "agent_lines_removed": 2249,
+      "user_added_per_file": {
+        ".agents/skills/tailwind-v4/SKILL.md": 22,
+        "crates/ars-dioxus-components/src/navigation/tabs/tabs.css": 16,
+        "crates/ars-dioxus-components/src/navigation/tabs/tailwind.rs": 3,
+        "crates/ars-dioxus/src/navigation/tabs.rs": 176,
+        "crates/ars-dioxus/tests/tabs_wasm.rs": 83,
+        "crates/ars-leptos-components/src/navigation/tabs/tabs.css": 16,
+        "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs": 3,
+        "crates/ars-leptos/src/navigation/tabs.rs": 151,
+        "crates/ars-leptos/tests/tabs_wasm.rs": 71,
+        "docs/implementation/adapter-components/02-adapter-api-and-wiring.md": 20,
+        "docs/implementation/adapter-components/03-framework-rules.md": 17,
+        "docs/implementation/adapter-components/04-adapter-tests.md": 7,
+        "docs/implementation/adapter-components/12-parity-audit-loop.md": 3,
+        "examples/widgets-dioxus-css/public/style.css": 28,
+        "examples/widgets-dioxus-css/src/categories/navigation.rs": 2,
+        "examples/widgets-dioxus-tailwind/src/categories/navigation.rs": 2,
+        "examples/widgets-leptos-css/assets/style.css": 28,
+        "examples/widgets-leptos-css/src/categories/navigation.rs": 4,
+        "examples/widgets-leptos-tailwind/src/categories/navigation.rs": 4,
+        "spec/components/navigation/tabs.md": 8,
+        "spec/dioxus-components/navigation/tabs.md": 8,
+        "spec/leptos-components/navigation/tabs.md": 8
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus-components/src/navigation/tabs/tabs.css": 1,
+        "crates/ars-dioxus-components/src/navigation/tabs/tailwind.rs": 3,
+        "crates/ars-dioxus/src/navigation/tabs.rs": 63,
+        "crates/ars-dioxus/tests/tabs_wasm.rs": 3,
+        "crates/ars-leptos-components/src/navigation/tabs/tabs.css": 1,
+        "crates/ars-leptos-components/src/navigation/tabs/tailwind.rs": 3,
+        "crates/ars-leptos/src/navigation/tabs.rs": 59,
+        "crates/ars-leptos/tests/tabs_wasm.rs": 3,
+        "examples/widgets-dioxus-css/public/style.css": 12,
+        "examples/widgets-dioxus-css/src/categories/navigation.rs": 18,
+        "examples/widgets-dioxus-tailwind/src/categories/navigation.rs": 25,
+        "examples/widgets-leptos-css/assets/style.css": 12,
+        "examples/widgets-leptos-css/src/categories/navigation.rs": 29,
+        "examples/widgets-leptos-tailwind/src/categories/navigation.rs": 40,
+        "spec/components/navigation/tabs.md": 5,
+        "spec/dioxus-components/navigation/tabs.md": 6,
+        "spec/leptos-components/navigation/tabs.md": 6
+      }
+    }
+  ]
+}
