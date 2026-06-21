@@ -1,0 +1,980 @@
+Recently we did several improvements on how we design and implement our adapter level components, the first one following those new improvements was the Checkbox one, for both adapters. Now I wanna do an audit of the other components that were already implemented. Starting with the tabs component
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Tabs Adapter Audit And Remediation Plan
+
+**Summary**
+- Audit Tabs against the current adapter workflow, using Checkbox as the recent baseline for adapter completeness.
+- Target a remediation PR, not a report-only pass: every concrete finding from spec drift, parity, widgets, E2E, and coverage lands in the same diff.
+- Current repo facts: `cargo xtask spec info tabs` maps Tabs to the agnostic spec plus Leptos/Dioxus adapter specs; Tabs already has adapter code, SSR/wasm tests, widgets in all six crates, and E2E harness coverage, but no checked-in counterpart sketch and no styled-source template modules.
+
+**Key Changes**
+- Create `docs/implementation/sketches/tabs-counterpart-audit-sketch.md` from live counterpart review, starting with React Aria / React Spectrum Tabs and recording Ark/Radix fallback status only for missing axes.
+- Reconcile the Tabs spec and adapters with the current adapter delivery contract:
+  - Keep the monolithic `Tabs` API only for outcomes the sketch proves without widget workarounds.
+  - If styling/customization or anatomy parity requires public primitive parts, add the minimum Leptos/Dioxus part API and update specs/tests/widgets accordingly.
+  - If ready-made visual Tabs are needed for widget parity, add category-first styled templates under `ars-leptos-components` and `ars-dioxus-components`.
+- Audit and fix adapter boundaries:
+  - Move duplicated renderer-independent helpers from Leptos/Dioxus into `ars-components` where feasible.
+  - Keep only renderer glue, refs, events, DOM APIs, and framework context reads in adapter code.
+  - Verify Dioxus hook order, `GlobalAttributes`, Leptos `TextProp`, `StoredValue` / `CopyValue`, prelude symmetry, and public docs.
+- Audit all consumer surfaces:
+  - Ensure all six widgets demonstrate supported Tabs outcomes as consumers, not by rebuilding keyboard, selection, reorder, close, ARIA, i18n, or visual-state policy locally.
+  - Update E2E fixtures and harness assertions so each supported matrix row has adapter proof, browser workflow proof, computed visual proof, locale/i18n proof where relevant, and axe coverage after reached states.
+
+**Test Plan**
+- Focused adapter checks:
+  - `cargo test -p ars-leptos --test tabs`
+  - `cargo test -p ars-dioxus --test tabs`
+  - browser-backed wasm Tabs tests with `REDACTED` and `WASM_BINDGEN_TEST_ONLY_WEB=1`
+  - `cargo check -p ars-dioxus --features desktop` if Dioxus non-web code changes
+- E2E and widget checks:
+  - `cargo xtask e2e navigation --adapter leptos`
+  - `cargo xtask e2e navigation --adapter dioxus`
+  - `cargo check --manifest-path` for all six widgets crates
+  - Playwright/browser evidence for reference Tabs and local widgets, stored under `.playwright-cli/` or `/tmp/`
+- Closeout gates:
+  - `cargo xtask lint adapter-parity`
+  - `cargo xtask spec validate`
+  - `cargo xfmt`
+  - `cargo xclippy`
+  - targeted coverage audit for touched native/wasm surfaces; no mutation testing as a pre-PR gate
+  - run `.agents/skills/post-implementation-audit/SKILL.md` and land all findings before presenting the diff
+
+**Assumptions**
+- This is a remediation PR for Tabs, not a findings-only report.
+- No commit or push happens until the completed audit/fix diff is presented and approved.
+- If no GitHub issue is assigned, implementation proceeds locally against the Tabs audit scope and any PR body will describe the audit scope rather than auto-closing an issue.
+
+---
+
+Let's rebase with the latest main, we did some new improvements in the implementation docs / skill for the adapter level components, give it a check if our improvements in the Tabs component already comply with the latest improvements
+
+---
+
+We have an older worktree here at /Users/ericson/.t3/worktrees/ars-ui/t3code-57e70103 that I intend to get back to it eventually, we were implementing the Select and Listbox components, but we found some bugs in the Tabs components there, let's give a check in the diffs related to tabs so see whether we need to improve something in our branch here
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Tabs Old-Worktree Diff Reconciliation Plan
+
+## Summary
+- Port the old worktree’s valid Tabs bug fixes into this branch, but only where they align with the latest adapter workflow and the current axe-driven Tabs anatomy.
+- Keep the current `TabShell` plus `aria-hidden` pointer close affordance. Do not restore the old WIP’s native close button expectation.
+- Focus remediation on three real gaps found by diff review: core-owned `aria-owns`, reorderable prop sync/spec drift, and adapter drag-image proof.
+
+## Key Changes
+- Move tablist ownership relationships back into the agnostic core:
+  - Add `aria-owns` to `Api::list_attrs()` from the registered `Context::tabs` order.
+  - Remove Leptos/Dioxus adapter-local `aria-owns` construction and derive rendered list attrs from the core API.
+  - Add/keep tests proving dynamic tab push/pop and reorder update `aria-owns`.
+
+- Fix reorderable state ownership:
+  - Include `Props::reorderable` in the core non-dir prop diff so adapter prop changes emit `SyncProps`.
+  - Let core `Api::tab_attrs()` own `aria-roledescription` when reorderable is enabled; keep adapter-owned `draggable` because it is browser/rendering glue.
+  - Update `spec/components/navigation/tabs.md` wording from “always emits” to “emits for every tab while `reorderable` is true,” matching current tests and behavior.
+
+- Add custom drag-image behavior from the old WIP:
+  - On `dragstart`, Leptos and Dioxus should clone the surrounding `TabShell`, mark the clone with `data-ars-drag-image`, call `DataTransfer.setDragImage`, then remove the clone after capture.
+  - Use current `TabShell { tab_key }` anatomy and `data-ars-tab-key`; do not introduce widget-local drag-preview logic.
+  - Add browser tests in both adapters proving the drag image is a detached shell clone and includes the close affordance.
+
+- Do not port stale old-WIP pieces:
+  - Do not change close trigger semantics to a visible native button with `tabindex="-1"`.
+  - Do not do the wholesale Dioxus focus/effect-handler refactor unless implementation proves it is required for the drag-image hook; current mounted-data focus coverage already passes.
+  - Do not widen Select/Listbox scope from the old worktree.
+
+## Test Plan
+- Focused checks:
+  - `cargo test -p ars-components navigation::tabs`
+  - `cargo test -p ars-leptos --features ssr --test tabs`
+  - `cargo test -p ars-dioxus --test tabs`
+  - Leptos/Dioxus browser-backed `tabs_wasm` tests with `REDACTED` and `WASM_BINDGEN_TEST_ONLY_WEB=1`
+  - `cargo check -p ars-dioxus --features desktop` if Dioxus event/node wiring changes touch non-web compilation
+
+- Browser/E2E checks:
+  - `cargo xtask e2e navigation --adapter leptos`
+  - `cargo xtask e2e navigation --adapter dioxus`
+  - Re-run widget smoke only if styling/demo code changes; otherwise keep the existing passing widget evidence.
+
+- Closeout gates:
+  - `cargo xtask lint adapter-parity`
+  - `cargo xtask spec validate`
+  - `cargo xfmt`
+  - `cargo xclippy`
+  - Re-run `.agents/skills/post-implementation-audit/SKILL.md` and land any findings in this same diff.
+
+## Assumptions
+- The old worktree is staged WIP and is used as evidence, not as a patch to apply wholesale.
+- This branch remains the source of truth for the current Tabs audit direction.
+- No commit or push happens until the completed reconciliation diff is presented and approved.
+
+---
+
+Should we provide this svg for the close button or allow the user to bring their own? How does React Aria handles it? Actual question, don't change any code yet
+
+---
+
+Does one of our other references have closable tabs? Live Radix UI / Shadcn UI or Ark UI / Chakra UI ?
+
+---
+
+So how do we proceed?
+
+---
+
+Great, let's proceed with it
+
+---
+
+Did we manage to properly split and expose the unstyled parts of our Tabs component following the newer directives to implement adapter level components?
+
+---
+
+Forget the older monolitic, all our adapter level components must follow this new directive. How can we implement it here? Do a proper plan
+
+---
+
+Will we be able to keep the type-safety?
+
+---
+
+But we will lose the ability to associate directly the tabs triggers and the list of tabs?
+
+---
+
+I meant the part where we pass the TabsSource and then we have to pass the TabShells for each tab in the TabSource
+
+---
+
+Looks great like this, good catch with the closure approach
+
+---
+
+Yeah, go ahead with it
+
+---
+
+We shouldn't keep the Tabs closed-anatomy one. The closed Tabs must live in the ars-*-components crate, they will be the styled high level component, composing these lower level parts we're introducing now
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Tabs Public Parts And Styled Component Split Plan
+
+## Summary
+- Remove the closed-anatomy `Tabs` component from the adapter crates as a public API.
+- Make `ars-leptos` and `ars-dioxus` expose only unstyled Tabs primitives and typed collection/rendering contracts.
+- Add the closed, ready-made high-level Tabs component under `ars-leptos-components` and `ars-dioxus-components`, alongside CSS and Tailwind source-template variants, composing the new lower-level adapter parts.
+
+## Adapter Crate API
+- Replace public adapter `Tabs` with public unstyled parts:
+  - `Root<K>`, `List<K>`, `Panels<K>`, `TabShell<K>`, `Tab<K>` part, `CloseTrigger<K>`, `Panel<K>`, `Indicator`, and `LiveRegion`.
+  - `Root<K>` receives `tabs: TabsSource<K>` and owns machine setup, registration, callbacks, i18n messages, selection, close, reorder, panel presence, indicator state, refs, and typed context.
+  - `List` and `Panels` iterate the root `TabsSource<K>`; consumers do not manually mirror the tab list.
+  - `TabShell`, `Tab`, `CloseTrigger`, and `Panel` take a typed `TabRenderItem<K>` supplied by `List` / `Panels`.
+- Preserve row-data compatibility where possible:
+  - Internally rename row data to `TabItem<K>`.
+  - Keep `pub type TabData<K> = TabItem<K>` and, if Rust/framework naming permits, keep `pub type Tab<K> = TabItem<K>` for old row construction.
+  - The public trigger part should be named `Tab` if it does not break source compatibility; otherwise use `Trigger` and document the naming decision in specs. Do not use string keys to avoid the naming issue.
+- Renderer customization:
+  - Dioxus `List` / `Panels` expose renderer props shaped as `Callback<TabRenderItem<K>, Element>`.
+  - Leptos `List` / `Panels` expose equivalent cloneable renderer props returning view content, using the repo’s existing `ViewFn`/callback wrapper pattern.
+  - Default `List` renders `TabShell { Tab, optional CloseTrigger }` plus `Indicator`; default `Panels` renders `Panel` for every item.
+- Remove public closed-anatomy adapter `Tabs` from prelude and docs. If a short compatibility transition is unavoidable, keep it deprecated and hidden from prelude, but the target contract is no public adapter `Tabs`.
+
+## Styled Components Crate
+- Add category-first modules:
+  - `crates/ars-leptos-components/src/navigation/tabs/{css.rs,tailwind.rs,tabs.css,mod.rs}`
+  - `crates/ars-dioxus-components/src/navigation/tabs/{css.rs,tailwind.rs,tabs.css,mod.rs}`
+- Implement closed high-level styled components there:
+  - `css::Tabs` and `tailwind::Tabs` receive the ergonomic closed-anatomy props previously offered by the adapter wrapper.
+  - They compose adapter `Root`, `List`, `Panels`, `TabShell`, `Tab`/`Trigger`, `CloseTrigger`, `Panel`, `Indicator`, and `LiveRegion`.
+  - CSS variants include documented part/state selectors; Tailwind variants keep class strings inline in markup per workflow rules.
+- Update widgets:
+  - Public visual widget demos use styled `ars-*-components` Tabs.
+  - Add at least one low-level unstyled composition demo or fixture proving direct adapter parts are usable, but avoid rebuilding behavior locally.
+
+## Spec And Sketch Updates
+- Update agnostic and adapter specs:
+  - remove monolithic adapter `Tabs` API snippets;
+  - document the part API, typed `TabRenderItem<K>`, collection-driven renderers, and no manual key re-listing;
+  - define `TabsSource<K>` as the only tab collection/order source;
+  - describe fallback rendering for `List`/`Panels` and renderer override behavior;
+  - document any private/non-public structural exceptions with reasons.
+- Add/update styled-component specs for Leptos/Dioxus components:
+  - closed `css::Tabs` / `tailwind::Tabs` live only in `ars-*-components`;
+  - styled modules are source templates, not adapter primitives.
+- Update `docs/implementation/sketches/tabs-counterpart-audit-sketch.md`:
+  - mark old monolithic-adapter conclusion as superseded;
+  - record public parts as the new adapter outcome;
+  - record styled closed Tabs as the high-level widget/source-template outcome.
+
+## Test Plan
+- Adapter tests first:
+  - SSR tests prove each public part renders correct roles, ARIA, ids, `data-ars-part`, typed item association, consumer styling attrs, and fallback/default renderer output.
+  - SSR tests prove `List`/`Panels` iterate `TabsSource<K>` and do not require duplicated key enumeration.
+  - Wasm tests prove selection, keyboard roving, manual activation, close click, Delete/Backspace close, dynamic push/pop/reorder, lazy/unmount panels, drag image cloning, and Ctrl+Arrow reorder through public parts.
+  - Prelude tests prove only unstyled primitives and row-data types are exported from adapter preludes.
+- Styled component tests:
+  - SSR tests for `css::Tabs` and `tailwind::Tabs` in both styled crates prove closed anatomy, classes, fallback close glyph/custom close content, indicator, panels, and state selectors.
+  - Widget checks for all six crates prove styled Tabs compile and render without component-policy duplication.
+- Browser/E2E:
+  - Navigation E2E fixtures cover adapter parts directly for behavior/parity.
+  - Widget/browser smoke covers styled high-level Tabs visual output.
+  - Axe runs after selected, closed, and reordered states.
+- Gates:
+  - `cargo test -p ars-leptos --features ssr --test tabs`
+  - `cargo test -p ars-dioxus --test tabs`
+  - Leptos/Dioxus `tabs_wasm` browser-backed tests
+  - styled component crate tests
+  - all six widgets `cargo check --manifest-path ...`
+  - `cargo xtask e2e navigation --adapter leptos`
+  - `cargo xtask e2e navigation --adapter dioxus`
+  - `cargo xtask lint adapter-parity`
+  - `cargo xtask spec validate`
+  - `cargo xfmt`
+  - `cargo xclippy`
+  - post-implementation audit and parity loop, with all findings landed.
+
+## Assumptions
+- This remediation may be a breaking adapter API change: closed `Tabs` moves out of adapter crates and into styled component crates.
+- `TabsSource<K>` remains the sole semantic collection source; render closures customize anatomy without duplicating tab order.
+- The high-level closed component should be styled-source-template code only, not an unstyled adapter shortcut.
+- No commit or push happens until the completed diff is presented and approved.
+
+---
+
+Continue from where you were
+
+---
+
+Why have you stopped before completing the proposed work?
+
+---
+
+Go ahead and finish the implementation of our whole plan
+
+---
+
+# Files mentioned by the user:
+
+## [Error - 11:52:35] Server process exited with code 0. 2026-06-17T11:52:35.80707…: /Users/ericson/.codex/attachments/52fbbec8-2e50-490b-ad43-f6ccefc409a2/pasted-text.txt
+
+## My request for Codex:
+For some reason in my vscode here rust-analyzer stopped working, with this error message here, any ideia? Don't change any file yet, just explain
+
+---
+
+What is happening? I clearly have cargo installed through rustup
+
+---
+
+Give me a command to fix those symlinks
+
+---
+
+I don't think that this looks right:
+```
+❯ cargo --version
+rustup 1.29.0 (2026-03-05)
+info: This is the version for the rustup toolchain manager, not the rustc compiler.
+info: the currently active `rustc` version is `rustc 1.96.0 (ac68faa20 2026-05-25)`
+```
+
+---
+
+still giving me the same think
+
+---
+
+Apply the fix yourself
+
+---
+
+Great, now getting back to our tabs components, based on our discussions in this sessions and in your implementation, do we have anything to improve in our implementation docs / skills for adapter level components?
+
+---
+
+Go ahead with those improvements
+
+---
+
+In the Dioxus tabs, I'm seeing code like this:
+```
+move |api| {
+            let mut attrs = api.panel_attrs(&key, None);
+
+            let is_selected = selected_key_for_attrs.as_ref() == Some(&key);
+
+            attrs
+                .set_bool(HtmlAttr::Data("ars-selected"), is_selected)
+                .set_bool(HtmlAttr::Hidden, !is_selected);
+
+            attr_map_to_dioxus_inline_attrs(attrs)
+        }
+```
+This part with the is_selected and setting the bools, which are agnostic to Dioxus, shouldn't live in the agnostic component layer?
+
+---
+
+Let's fix it up then
+
+---
+
+It seems that the issue is that I have a chromedriver / chrome version mismatch
+
+---
+
+Need to download an older version of chromedriver
+
+---
+
+There are any other places where we set things in the AttrMap in Dioxus or Leptos that should be moved to the agnostic layer?
+
+---
+
+Go for it, and remember to add this kind of thing in the implementation docs / skills
+
+---
+
+Why in some places we do `let _ = indicator_revision();` and in other we do `indicator_revision();` for the revision signal listener?
+
+---
+
+Have you checked in the latest Dioxus docs if they have something similar to this `.track()` in Leptos?
+
+---
+
+Alright, let's normalize like this then
+
+---
+
+You're not supposed to put all parts of a component in the prelude, you shouldn't put any part at all. Users must call as `tabs::Root` for example
+
+---
+
+And make sure to never import part names directly in any test file, always use through the module as `tabs::Root` otherwise we may introduce name clashing down the road
+
+---
+
+What is this [.tabs.rs.pending-snap](crates/ars-leptos/tests/.tabs.rs.pending-snap) file?
+
+---
+
+In the non-css and non-tailwind example for Dioxus and for Leptos you MUST NOT use the CSS high level component, you must use the unstyled low level components instead. I thought that the implementation docs were making sure of that, like we have for the checkboxes
+
+---
+
+Why are we using an optional Children and not a TypedChildren in the Leptos tabs::Root? Actual question don't change any code yet
+
+---
+
+Alright, properly document it then
+
+---
+
+Do we actually need to receive `attrs: Vec<crate::LeptosAttribute>` in Leptos component parts? Can't we spread the attributes directly with `{..attrs}` ? Actual question, don't change any code yet
+
+---
+
+Doesn't our parts need to have class and style props instead like the checkbox ones?
+
+---
+
+Oh I see, then make sense for it to use the lower level attrs directly
+
+---
+
+Then Indicator should be a public function?
+
+---
+
+Then let's fix it and any other internal component like that, it's currently a `pub fn`
+
+---
+
+What happened to that idea of having the inner parts receiving a closure with the tab element to be rendered?
+```
+<tabs::Root tabs=tabs default_value=...>
+  <tabs::List tab_row=|item| view! {
+    <tabs::TabShell item=item>
+      <tabs::Tab item=item />
+      <tabs::CloseTrigger item=item />
+    </tabs::TabShell>
+  } />
+  <tabs::Panels panel=|item| view! {
+    <tabs::Panel item=item />
+  } />
+</tabs::Root>
+```
+
+---
+
+But for the tailwind users, how they will pass their classes to the close trigger and tab indicator? Actual question, don't change any code yet
+
+---
+
+Alright, then let's make sure to write great documentation explaining it
+
+---
+
+Based on our interactions in this session, do we have anything else useful to add to the adapter layer implementation docs / skills?
+
+---
+
+Then go for it
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Keyboard
+Node position: (269, 583) in 599x994 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://localhost:4200/
+Frame: top document
+Target: "Keyboard"
+Target role: "presentation"
+Target selector: div#tabs-131-tablist > div:nth-of-type(2)
+Target path: section > div > div > div
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+Why the blue part of the tab isn't encompassing the close button together? And the close button is disappearing when the tab is selected
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Keyboard" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Keyboard
+Node position: (255, 572) in 599x994 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://localhost:4200/
+Frame: top document
+Target: "Keyboard"
+Target role: "presentation"
+Target selector: div#tabs-131-tablist > div:nth-of-type(2)
+Target path: section > div > div > div
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+The close button isn't properly centered in the right side, it's sticking to the right border. And when the tab isn't selected, the hover effect doesn't encompass the close button, it feels like the close button isn't properly part of the tab
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Keyboard" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Keyboard
+Node position: (259, 587) in 599x994 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://localhost:4200/
+Frame: top document
+Target: "Keyboard"
+Target role: "presentation"
+Target selector: div#tabs-131-tablist > div:nth-of-type(2)
+Target path: section > div > div > div
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+Now hovering over a selected tab is unreadable, and we need a hover effect for the close button when it's in the selected state
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Keyboard" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Closable
+Node position: (363, 570) in 599x994 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://localhost:4200/
+Frame: top document
+Target: "Closable"
+Target role: "presentation"
+Target selector: div#tabs-131-tablist > div:nth-of-type(3)
+Target path: section > div > div > div
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+But now we don't a background effect when hovering over a not selected tab
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Closable" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Closable
+Node position: (366, 573) in 599x994 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://localhost:4200/
+Frame: top document
+Target: "Closable"
+Target role: "presentation"
+Target selector: div#tabs-131-tablist > div:nth-of-type(3)
+Target path: section > div > div > div
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+Now when hovering over the close button in a non-select tab, I can't see its hover effect
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Closable" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Keyboard
+Node position: (245, 573) in 599x994 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://localhost:4200/
+Frame: top document
+Target: "Keyboard"
+Target role: "presentation"
+Target selector: div#tabs-131-tablist > div:nth-of-type(2)
+Target path: section > div > div > div
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+There is still more space in the left side of the close button than in the right side, can it be centered?
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Keyboard" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+I'm disliking here the sheer amount of classes that we have to pass to the tabs::List component to properly style it's inner components. We've put those components internally as they might break if not properly composed. But I think that for the low level component parts it should be fine to put the user to it's own risk, if it will also enable they to better style their parts. So that idea of having the parts receiving a closure seems interesting again, something like: 
+```<tabs::Root tabs=tabs default_value=...>
+  <tabs::List tab_row=|item| view! {
+    <tabs::TabShell item=item>
+      <tabs::Tab item=item />
+      <tabs::CloseTrigger item=item />
+    </tabs::TabShell>
+  } />
+  <tabs::Panels panel=|item| view! {
+    <tabs::Panel item=item />
+  } />
+</tabs::Root>
+```
+What do you think?
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Let's go for it, for both adapters. We expose the safer higher level `Tabs` components for CSS and Tailwind users nonetheless, this way they can also compose their components from the lower level parts if needed
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Overview Keyboard Closable Disabled
+Node position: (285, 564) in 599x994 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://localhost:4200/
+Frame: top document
+Target: "Overview Keyboard Closable Disabled"
+Target role: "tablist"
+Target selector: div#tabs-131-tablist
+Target path: div > section > div > div
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+When using the keyboard, on a selected tab the focus ring doesn't encompass the whole tab shell, only the tab label, it misses the closing button
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Overview Keyboard Closable Disabled" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+I'd like that our examples have the full form of Tabs code, with all possible parts
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Can the tabs::Trigger and tabs::CloseTrigger receive the `item` through a context put by the tabs::TabShell instead of needing the user to clone it?
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+I'm fine with the generics
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+I don't care about backward compatibility, we don't have any user yet
+
+---
+
+I'm seeing that in our `tailwind.css` files in the examples, we're still doing a ton of things like:
+```
+    [data-ars-part="tab-shell"]:has(
+            [data-ars-scope="tabs"][data-ars-part="tab"]:not(
+                    [aria-disabled="true"]
+                ):not([data-ars-selected])
+        ):hover {
+        @apply bg-white text-slate-950 shadow-sm ring-1 ring-slate-300/50;
+    }
+```
+It means that our components aren't still properly exposing enough parts to be styled with tailwind classes directly? Actual question, don't change any code yet
+
+---
+
+Let's properly fix it then, if a user is using the tailwind variant of a component, they MUST be able to only write or tweaks the tailwind classes in that component to achieve the desired styling, without having to write any CSS code elsewhere. Make sure to add that in our implementation docs / skills
+
+---
+
+# Files mentioned by the user:
+
+## codex-clipboard-13890b21-a4fb-4f15-9885-21a81a1606ce.png: /var/folders/ts/_zp0gkt95q72v3w7wfnd84z80000gn/T/codex-clipboard-13890b21-a4fb-4f15-9885-21a81a1606ce.png
+
+## My request for Codex:
+We keep introducing tailwind classes with warnings, I think that we need to have a skill with the latest guidance on tailwind good practices, according to their latest version
+
+---
+
+# Files mentioned by the user:
+
+## codex-clipboard-b3835e16-ff48-4260-969d-7010b6dd7a15.png: /var/folders/ts/_zp0gkt95q72v3w7wfnd84z80000gn/T/codex-clipboard-b3835e16-ff48-4260-969d-7010b6dd7a15.png
+
+## My request for Codex:
+Dioxus is breaking a bit, I can't click a tab previously selected, it get blank, seems to be a issue between the selected and the closable tabs, only happens on closable ones
+
+---
+
+# Files mentioned by the user:
+
+## codex-clipboard-a5c484fa-8aaa-4365-ac0c-11729b25a49f.png: /var/folders/ts/_zp0gkt95q72v3w7wfnd84z80000gn/T/codex-clipboard-a5c484fa-8aaa-4365-ac0c-11729b25a49f.png
+
+## codex-clipboard-ecf0ceb6-17e6-42bd-949b-60aae910b866.png: /var/folders/ts/_zp0gkt95q72v3w7wfnd84z80000gn/T/codex-clipboard-ecf0ceb6-17e6-42bd-949b-60aae910b866.png
+
+## My request for Codex:
+If I reorder, everything gets messed up it seems
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Overview Keyboard Closable Disabled
+Node position: (157, 575) in 599x994 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://localhost:4200/
+Frame: top document
+Target: "Overview Keyboard Closable Disabled"
+Target role: "tablist"
+Target selector: div#ars-tabs-28-tablist
+Target path: div > section > div > div
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+Stop treating it as a tailwind only issue, on Dioxus if I try to reorder tabs, it seems that internally they were reordered, but they'r being rendered in the previous ordering and in a buggy state
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Overview Keyboard Closable Disabled" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+What the previous fix attempts were doing then? Should we keep them?
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Alright, the only styling issue I'm seeing now, is that when I hover over the the category tabs, I get the text selection cursor and when I hover over the tabs example I get the normal cursor. I want the normal cursor in the categories tabs too
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Navigation
+Node position: (336, 275) in 599x994 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://localhost:4200/
+Frame: top document
+Target: "Navigation"
+Target role: "tab"
+Target selector: div#ars-tabs-0-tab-i-3
+Target path: div > div > div > div
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+Tabs in CSS are a bit too large vertically, let's make it a bit smaller to be more similar to the tailwind examples
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Navigation" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Keyboard
+Node position: (278, 500) in 599x994 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://localhost:4200/
+Frame: top document
+Target: "Keyboard"
+Target role: "presentation"
+Target selector: div#ars-tabs-28-tablist > div.ars-tabs__tab-shell:nth-of-type(2)
+Target path: section > div > div > div
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+When I use the keyboard, the focus ring isn't encompassing the whole tab shell, just the label part
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Keyboard" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# Files mentioned by the user:
+
+## codex-clipboard-04337363-468d-43b2-ae7d-7893ef38ba03.png: /var/folders/ts/_zp0gkt95q72v3w7wfnd84z80000gn/T/codex-clipboard-04337363-468d-43b2-ae7d-7893ef38ba03.png
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+When I try to drag an element with a focus ring to reorder the tabs, this weird thing happens
+
+---
+
+# Files mentioned by the user:
+
+## codex-clipboard-3ed7c5f2-c963-48c2-9819-2fd570aeaa2f.png: /var/folders/ts/_zp0gkt95q72v3w7wfnd84z80000gn/T/codex-clipboard-3ed7c5f2-c963-48c2-9819-2fd570aeaa2f.png
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Still happening, any other hypothesis?
+
+---
+
+# Files mentioned by the user:
+
+## codex-clipboard-16bcec5a-ed3e-48d0-9131-07eec111fb93.png: /var/folders/ts/_zp0gkt95q72v3w7wfnd84z80000gn/T/codex-clipboard-16bcec5a-ed3e-48d0-9131-07eec111fb93.png
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Still the same issue, try to debug it in the Codex Browser, you just need to change the selected tab using the keyboard, then try to drag and drop the selected tab while it has the focus ring on it
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Just gave you full access, try again now
+
+---
+
+# Files mentioned by the user:
+
+## codex-clipboard-7af1556b-2600-4dbd-a737-7010d7104292.png: /var/folders/ts/_zp0gkt95q72v3w7wfnd84z80000gn/T/codex-clipboard-7af1556b-2600-4dbd-a737-7010d7104292.png
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+It's even worse now! The original bug is still there, and we lost our drag image with the whole Tab Shell
+
+---
+
+# Files mentioned by the user:
+
+## codex-clipboard-94729045-6fc9-41bf-8d84-1ad5bdc9ebaa.png: /var/folders/ts/_zp0gkt95q72v3w7wfnd84z80000gn/T/codex-clipboard-94729045-6fc9-41bf-8d84-1ad5bdc9ebaa.png
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+The drag image is fixed, but we still have the original bug going on
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Hmm, I noted that I can't drag and drop by clicking in the area of the tab closer to the close trigger. It may be a lead into this bug. Maybe we need to use the tabshell as our drag and drop, not just the tab label part
+
+---
+
+# Files mentioned by the user:
+
+## codex-clipboard-0d89e8d4-25aa-4caf-ae75-158976787856.png: /var/folders/ts/_zp0gkt95q72v3w7wfnd84z80000gn/T/codex-clipboard-0d89e8d4-25aa-4caf-ae75-158976787856.png
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Great, the initial bug with the drag and drop is finally fixed, but I noted that if I move the focus ring and click in the focused tab, it shows the same thing as before, it disappears when I drag and drop at least, it only appear now if I click in a focused tab, seems like a similar issue, of something going to the tab label instead of the tab shell
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+I noted that when I hover through the tab label, the cursor change to the hand with index finger up, when I hover over the close trigger part, it changes to the open hand. Let's have the one with index finger up in both cases, and also in the Tailwind examples. And can we use the closed hand when drag and dropping with the drag image? Currently it turns back into the normal cursor
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Based on our findings until now, do we have something to add in our implementation docs / skills?
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Then let's add those there
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Can our tailwind examples use the high level tailwind components instead of the low level parts?
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Just noted that the CSS examples are also using the low level parts. Our CSS and Tailwind examples must always use the high level components, only the non-CSS non-Tailwind examples will use the low level parts. Male sure to add that to your implementation docs / skills. And take caution to preserve all of our CSS/Tailwind fixes
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+I reviewed here, let's commit and push a PR to github
+
+---
+
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: http://localhost:4200/
+
+## My request for Codex:
+Why haven't you started the review loop as described in [$waiting-for-codex-review](/Users/ericson/.codex/worktrees/61ee/ars-ui/.agents/skills/waiting-for-codex-review/SKILL.md) ?

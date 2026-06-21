@@ -1,0 +1,23 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "13d1ef231c6e",
+  "strategy": "manual-commit",
+  "branch": "codex/tabs-public-parts-styled-split",
+  "checkpoints_count": 0,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/13/d1ef231c6e/0/metadata.json",
+      "transcript": "/13/d1ef231c6e/0/full.jsonl",
+      "content_hash": "/13/d1ef231c6e/0/content_hash.txt",
+      "prompt": "/13/d1ef231c6e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 703473,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 13602048,
+    "output_tokens": 30498,
+    "api_call_count": 102
+  }
+}
