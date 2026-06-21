@@ -485,7 +485,7 @@ async fn wait_for_tab_absent(driver: &WebDriver, label: &str) -> Result<(), Erro
 
             Ok(_) => time::sleep(Duration::from_millis(50)).await,
 
-            Err(Error::Timeout(_)) | Err(Error::WebDriver(_)) => return Ok(()),
+            Err(Error::Timeout(_)) => return Ok(()),
 
             Err(error) => return Err(error),
         }

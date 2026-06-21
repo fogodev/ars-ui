@@ -92,9 +92,9 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
             on_value_change: props.on_value_change,
             on_close_tab: props.on_close_tab,
             on_reorder: props.on_reorder,
-            attrs: root_class_attrs(props.attrs, "group mt-6 grid gap-3 text-gray-900"),
+            attrs: root_class_attrs(props.attrs, "mt-6 grid gap-3 text-gray-900"),
             tabs::List::<K> {
-                class: "relative mb-5 flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 shadow-inner **:data-[ars-part=tab-indicator]:pointer-events-none **:data-[ars-part=tab-indicator]:absolute **:data-[ars-part=tab-indicator]:left-0 **:data-[ars-part=tab-indicator]:top-0 **:data-[ars-part=tab-indicator]:rounded-lg **:data-[ars-part=tab-indicator]:bg-white **:data-[ars-part=tab-indicator]:shadow-lg **:data-[ars-part=tab-indicator]:ring-1 **:data-[ars-part=tab-indicator]:ring-slate-300/40 **:data-[ars-part=tab-indicator]:transition-all **:data-[ars-part=tab-indicator]:duration-200 **:data-[ars-part=tab-indicator]:ease-out",
+                class: "relative mb-5 flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 shadow-inner **:data-[ars-part=tab-indicator]:pointer-events-none **:data-[ars-part=tab-indicator]:absolute **:data-[ars-part=tab-indicator]:left-0 **:data-[ars-part=tab-indicator]:top-0 **:data-[ars-part=tab-indicator]:w-(--ars-indicator-width) **:data-[ars-part=tab-indicator]:h-(--ars-indicator-height) **:data-[ars-part=tab-indicator]:translate-x-(--ars-indicator-left) **:data-[ars-part=tab-indicator]:translate-y-(--ars-indicator-top) **:data-[ars-part=tab-indicator]:rounded-lg **:data-[ars-part=tab-indicator]:bg-white **:data-[ars-part=tab-indicator]:shadow-lg **:data-[ars-part=tab-indicator]:ring-1 **:data-[ars-part=tab-indicator]:ring-slate-300/40 **:data-[ars-part=tab-indicator]:transition-all **:data-[ars-part=tab-indicator]:duration-200 **:data-[ars-part=tab-indicator]:ease-out",
 
                 tab_row: |item: tabs::TabRenderItem<K>| rsx! {
                     tabs::TabShell {

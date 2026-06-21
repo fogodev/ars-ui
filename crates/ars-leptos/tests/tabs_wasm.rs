@@ -41,6 +41,7 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 type TestTab = tabs::Tab<&'static str>;
 type TestReorderEvent = tabs::ReorderEvent<&'static str>;
+type StrKey = &'static str;
 
 #[component]
 #[expect(
@@ -4624,6 +4625,97 @@ async fn store_same_key_row_update_refreshes_trigger_and_panel_content() {
         selected_panel_text(&parent),
         "Panel one updated",
         "same-key panel content should refresh from the latest tab row"
+    );
+
+    drop(mount_handle);
+}
+
+#[wasm_bindgen_test(async)]
+async fn custom_renderers_refresh_after_same_key_row_updates() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, store) = owner.with(|| {
+        let parent = container();
+        let store = store_handle(three_tabs());
+        let field: tabs::Field<Vec<TestTab>> = store.tabs().into();
+
+        let render_tab = tabs::TabRenderer::from(|item: tabs::TabRenderItem<StrKey>| {
+            let key = item.key();
+
+            view! { <div data-custom-tab=key>{item.tab.label.run()}</div> }
+        });
+        let render_panel = tabs::TabPanelRenderer::from(|item: tabs::TabRenderItem<StrKey>| {
+            let key = item.key();
+
+            view! { <section data-custom-panel=key>{item.tab.panel.run()}</section> }
+        });
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <tabs::Root default_value="first" tabs=field>
+                    <tabs::List<StrKey> tab_row=render_tab />
+                    <tabs::Panels<StrKey> panel=render_panel />
+                </tabs::Root>
+            }
+        });
+
+        (mount_handle, parent, store)
+    });
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        parent
+            .query_selector(r#"[data-custom-tab="first"]"#)
+            .expect("query should succeed")
+            .expect("custom tab should render")
+            .text_content()
+            .unwrap_or_default(),
+        "First"
+    );
+    assert_eq!(
+        parent
+            .query_selector(r#"[data-custom-panel="first"]"#)
+            .expect("query should succeed")
+            .expect("custom panel should render")
+            .text_content()
+            .unwrap_or_default(),
+        "Panel one"
+    );
+
+    owner.with(|| {
+        let field = store.tabs();
+        let mut tabs = field.write();
+
+        tabs[0] = tabs::Tab::new_with_label(
+            "first",
+            "First",
+            ViewFn::from(|| view! { "First custom update" }),
+            ViewFn::from(|| view! { <p>"Panel custom update"</p> }),
+        );
+    });
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        parent
+            .query_selector(r#"[data-custom-tab="first"]"#)
+            .expect("query should succeed")
+            .expect("custom tab should still render")
+            .text_content()
+            .unwrap_or_default(),
+        "First custom update",
+        "same-key custom tab renderer should receive the replacement row"
+    );
+    assert_eq!(
+        parent
+            .query_selector(r#"[data-custom-panel="first"]"#)
+            .expect("query should succeed")
+            .expect("custom panel should still render")
+            .text_content()
+            .unwrap_or_default(),
+        "Panel custom update",
+        "same-key custom panel renderer should receive the replacement row"
     );
 
     drop(mount_handle);

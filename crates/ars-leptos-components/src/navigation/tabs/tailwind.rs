@@ -91,12 +91,12 @@ where
                     reorderable
                     on_value_change
                     on_close_tab
-                    class=root_class("group mt-6 grid gap-3 text-gray-900", class)
+                    class=root_class("mt-6 grid gap-3 text-gray-900", class)
                 >
                     <tabs::List<
                     K,
                 >
-                        class="flex relative flex-wrap gap-1.5 items-center p-1.5 mb-5 rounded-xl border shadow-inner border-slate-200 bg-slate-100 **:data-[ars-part=tab-indicator]:pointer-events-none **:data-[ars-part=tab-indicator]:absolute **:data-[ars-part=tab-indicator]:left-0 **:data-[ars-part=tab-indicator]:top-0 **:data-[ars-part=tab-indicator]:rounded-lg **:data-[ars-part=tab-indicator]:bg-white **:data-[ars-part=tab-indicator]:shadow-lg **:data-[ars-part=tab-indicator]:ring-1 **:data-[ars-part=tab-indicator]:ring-slate-300/40 **:data-[ars-part=tab-indicator]:transition-all **:data-[ars-part=tab-indicator]:duration-200 **:data-[ars-part=tab-indicator]:ease-out"
+                        class="flex relative flex-wrap gap-1.5 items-center p-1.5 mb-5 rounded-xl border shadow-inner border-slate-200 bg-slate-100 **:data-[ars-part=tab-indicator]:pointer-events-none **:data-[ars-part=tab-indicator]:absolute **:data-[ars-part=tab-indicator]:left-0 **:data-[ars-part=tab-indicator]:top-0 **:data-[ars-part=tab-indicator]:w-(--ars-indicator-width) **:data-[ars-part=tab-indicator]:h-(--ars-indicator-height) **:data-[ars-part=tab-indicator]:translate-x-(--ars-indicator-left) **:data-[ars-part=tab-indicator]:translate-y-(--ars-indicator-top) **:data-[ars-part=tab-indicator]:rounded-lg **:data-[ars-part=tab-indicator]:bg-white **:data-[ars-part=tab-indicator]:shadow-lg **:data-[ars-part=tab-indicator]:ring-1 **:data-[ars-part=tab-indicator]:ring-slate-300/40 **:data-[ars-part=tab-indicator]:transition-all **:data-[ars-part=tab-indicator]:duration-200 **:data-[ars-part=tab-indicator]:ease-out"
                         tab_row=move |item| {
                             view! {
                                 <tabs::TabShell

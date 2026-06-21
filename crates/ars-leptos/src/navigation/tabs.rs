@@ -14,7 +14,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug},
     marker::PhantomData,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
 };
 
 use ars_collections::{Key, TabKey};
@@ -166,6 +169,8 @@ pub struct Tab<K: TabKey> {
     /// When `Some`, the tab renders as `<a href=…>` instead of the
     /// default role-backed trigger element.
     pub link: Option<SafeUrl>,
+
+    render_revision: u32,
 }
 
 impl<K: TabKey> Tab<K> {
@@ -190,6 +195,7 @@ impl<K: TabKey> Tab<K> {
             closable: false,
             close_trigger: None,
             link: None,
+            render_revision: next_tab_render_revision(),
         }
     }
 
@@ -211,6 +217,7 @@ impl<K: TabKey> Tab<K> {
             closable: false,
             close_trigger: None,
             link: None,
+            render_revision: next_tab_render_revision(),
         }
     }
 
@@ -279,6 +286,7 @@ where
             closable: false,
             close_trigger: None,
             link: None,
+            render_revision: next_tab_render_revision(),
         }
     }
 }
@@ -294,6 +302,12 @@ impl<K: TabKey> Debug for Tab<K> {
             .field("link", &self.link)
             .finish_non_exhaustive()
     }
+}
+
+fn next_tab_render_revision() -> u32 {
+    static NEXT: AtomicU32 = AtomicU32::new(1);
+
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -773,7 +787,7 @@ pub fn List<K: TabKey>(
         <div {..list_attrs}>
             <For
                 each=each_tabs
-                key=|tab| (tab.key.into_key(), tab.link.is_some())
+                key=|tab| (tab.key.into_key(), tab.link.is_some(), tab.render_revision)
                 children=render_button
             />
             <Indicator attrs=tab_indicator_attrs style=indicator_style />
@@ -813,7 +827,7 @@ pub fn Panels<K: TabKey>(
         <div {..attrs}>
             <For
                 each=each_panels
-                key=|tab| tab.key.into_key()
+                key=|tab| (tab.key.into_key(), tab.render_revision)
                 children=move |tab| {
                     let item = TabRenderItem { tab };
                     if let Some(render_panel_item) = &panel {

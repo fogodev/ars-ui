@@ -65,3 +65,29 @@ fn styled_tabs_accept_absent_reorder_callback_for_external_sources() {
         "reorderable styled tabs should still render draggable semantics: {html}"
     );
 }
+
+#[test]
+fn tailwind_tabs_indicator_consumes_adapter_measurement_variables() {
+    let html =
+        render(|| view! { <tailwind::Tabs default_value="first" tabs=two_tabs() /> }.to_html());
+
+    for fragment in [
+        r#"**:data-[ars-part=tab-indicator]:w-(--ars-indicator-width)"#,
+        r#"**:data-[ars-part=tab-indicator]:h-(--ars-indicator-height)"#,
+        r#"**:data-[ars-part=tab-indicator]:translate-x-(--ars-indicator-left)"#,
+        r#"**:data-[ars-part=tab-indicator]:translate-y-(--ars-indicator-top)"#,
+    ] {
+        assert!(html.contains(fragment), "missing {fragment}: {html}");
+    }
+}
+
+#[test]
+fn tailwind_tabs_root_does_not_define_unnamed_group_scope() {
+    let html =
+        render(|| view! { <tailwind::Tabs default_value="first" tabs=two_tabs() /> }.to_html());
+
+    assert!(
+        !html.contains(r#"group mt-6 grid gap-3 text-gray-900"#),
+        "root-level group should not leak hover state to all close triggers: {html}"
+    );
+}
